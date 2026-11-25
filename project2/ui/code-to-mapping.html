@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mapping from Code &middot; BMO ParityPilot</title><link rel="stylesheet" href="/ui/style.css"></head><body>
+<div class="top"><img id="logo" alt="logo"><div class="brand"><b>BMO ParityPilot</b><small>AI-ASSISTED MODERNIZATION, WITH PROOF</small></div></div>
+<div class="page">
+  <h1 class="page-title">Mapping from Code</h1>
+  <p class="lead">Turn existing code into a source-to-target mapping document that people can review, and download it as Excel.</p>
+  <div class="jobbar" id="jobbar"></div>
+  <div class="card" id="nojob" hidden><div class="empty">Create a migration above to begin.</div></div>
+
+  <div id="content" hidden>
+    <div class="card"><h2>1. Attach the code</h2><div id="sources"></div></div>
+
+    <div class="card"><h2>2. Ask Copilot to write the mapping <span class="pill">AI draft</span></h2>
+      <div class="hint">The prompt includes facts measured from your code and asks for two tables in the same layout as a standard mapping spreadsheet.</div>
+      <div id="cp_code_to_mapping"></div>
+      <div class="row"><input type="text" id="vnote" placeholder="What changed in the code since the last version? (optional note, saved with the version)" style="flex:1"></div>
+      <p class="hint">Each time you rebuild the mapping after the code changed, it is saved as a <b>new version</b> and compared with the previous one. Building the same thing twice does nothing.</p></div>
+
+    <div class="card"><h2>3. Review the latest mapping <span class="pill" id="mapState">not built yet</span></h2>
+      <div id="mapOut"><div class="empty">Paste Copilot's reply above and click <b>Build mapping from reply</b>.</div></div></div>
+
+    <div class="card" id="versions" hidden><h2>4. Versions and changes <span class="pill" id="verPill"></span></h2>
+      <div id="verTable"></div>
+      <div class="row" id="cmpRow"><label>Compare</label><select id="cmpA"></select><label>to</label><select id="cmpB"></select><button class="alt" id="cmpBtn">Show changes</button></div>
+      <div id="diffOut"></div></div>
+
+    <div class="card"><h2>5. Sign off and download</h2>
+      <div class="row"><input type="text" id="who" placeholder="Your name" style="width:180px"><input type="text" id="note" placeholder="Comment (optional)" style="flex:1"><button id="approveMap">I reviewed it: Sign off mapping</button></div>
+      <div class="row"><a class="btn" id="dlX" href="#">Download latest Excel (.xlsx)</a><a class="btn alt" id="dlM" href="#">Mapping .csv</a><a class="btn alt" id="dlR" href="#">Joins and filters .csv</a><span id="reportBtn"></span></div>
+      <p class="hint">The Excel file uses the same two sheets and headers as the example mapping template, so it opens straight into your usual review process. Review it before use: it is a draft from AI.</p></div>
+    <div class="card"><h2>Next</h2><a class="btn alt" href="/mapping-to-code">Code from Mapping &rarr;</a></div>
+  </div>
+</div>
+<footer class="foot">Mock data only &middot; AI-assisted, human-approved &middot; every action is recorded in the audit trail</footer>
+<div id="msg"></div>
+<script src="/ui/md.js"></script><script src="/ui/nav.js"></script><script src="/ui/common.js"></script>
+<script>
+mainNav('/code-to-mapping'); loadLogo();
+async function reload(){ await load(job) }
+function stateHtml(d){
+  const m=d.model, s=d.summary, srcs=Object.keys(s.source_tables);
+  let h=tiles([[s.columns,'Target columns'],[s.rules,'Rules'],[srcs.length,'Source tables'],[Object.values(s.joins).reduce((a,b)=>a+b,0),'Joins'],[s.filters,'Filters'],[d.lint.filter(i=>i.severity==='high').length,'High-severity issues']]);
+  h+='<h3 style="font-size:15px;margin:6px 0 4px">Source to target mapping</h3>'+mappingTable(m);
+  h+='<h3 style="font-size:15px;margin:18px 0 4px">Joins, filters and rules (in order)</h3>'+(m.rules.length?rulesTable(m):'<div class="empty">Copilot did not return a Joins_Filters table.</div>');
+  h+='<h3 style="font-size:15px;margin:18px 0 4px">Checks on the mapping</h3>'+lintHtml(d.lint);
+  if(d.coverage) h+='<h3 style="font-size:15px;margin:18px 0 4px">Rule coverage: does the mapping match the code?</h3>'+coverageHtml(d.coverage,'Names and rules from the mapping found in your code');
+  return h;
+}
+async function load(name){
+  const s=await call('GET','/api/job/'+name);
+  showSources(s.sources); fillPanel('code_to_mapping',s.answers.code_to_mapping); reportLinks('reportBtn');
+  const d=await call('GET','/api/job/'+name+'/derived'); renderVersions(d);
+  $('mapOut').innerHTML=d.model?stateHtml(d):'<div class="empty">Paste Copilot\'s reply above and click <b>Build mapping from reply</b>.</div>';
+  $('mapState').textContent=d.model?(d.approved?'signed off':'needs sign-off'):'not built yet'; $('mapState').className='pill '+(d.approved?'ok':(d.model?'warn':''));
+  $('approveMap').disabled=!d.model;
+  for(const [id,what] of [['dlX','mapping_xlsx'],['dlM','mapping_csv'],['dlR','rules_csv']]){ const a=$(id); a.href=d.model?'/api/job/'+name+'/download?what='+what:'#'; a.style.opacity=d.model?1:.4; a.style.pointerEvents=d.model?'auto':'none' }
+}
+$('approveMap').onclick=()=>approveItem('derived_mapping','who','note');
+function when(t){ return t?t.replace('T',' '):'' }
+function renderVersions(d){
+  const vs=d.versions||[]; $('versions').hidden=!vs.length; if(!vs.length) return;
+  $('verPill').textContent=vs.length===1?'1 version':vs.length+' versions, latest v'+d.version;
+  const base='/api/job/'+encodeURIComponent(job)+'/download?version=';
+  $('verTable').innerHTML=table(['Version','Built','By','Note','What changed','Signed off','Download'],vs.slice().reverse().map(v=>[
+    '<span class="vtag">v'+v.n+'</span>'+(v.n===d.version?' <span class="hint">latest</span>':''),nw(when(v.uploaded)),nw(v.by||''),esc(v.note||''),esc(v.summary),v.approved?'<span class="sev found">Signed off</span>':'<span class="hint">no</span>',
+    '<a href="'+base+v.n+'&what=mapping_xlsx">Excel</a> &middot; <a href="'+base+v.n+'&what=mapping_csv">CSV</a>']));
+  $('cmpRow').hidden=vs.length<2;
+  const opts=vs.map(v=>'<option value="'+v.n+'">v'+v.n+'</option>').join(''); $('cmpA').innerHTML=opts; $('cmpB').innerHTML=opts;
+  $('cmpA').value=vs.length>1?vs[vs.length-2].n:vs[0].n; $('cmpB').value=d.version;
+  if(vs.length>1) showChanges(); else $('diffOut').innerHTML='<div class="empty">This is the first version. Change the code, rebuild the mapping, and the changes appear here.</div>';
+}
+async function showChanges(){
+  const a=$('cmpA').value,b=$('cmpB').value; if(a===b){ $('diffOut').innerHTML='<div class="empty">Choose two different versions.</div>'; return }
+  const r=await call('GET','/api/job/'+job+'/derived_compare?from='+a+'&to='+b);
+  let h='<h3 style="font-size:16px;margin:14px 0 4px">What changed in the mapping: v'+r.from+' &rarr; v'+r.to+'</h3>'+diffHtml(r.diff);
+  const files=Object.keys(r.scripts);
+  h+='<h3 style="font-size:16px;margin:20px 0 4px">What changed in the code: v'+r.from+' &rarr; v'+r.to+'</h3>';
+  const changed=files.filter(f=>r.scripts[f].status!=='same');
+  h+=changed.length?changed.map(f=>'<h4 style="margin:12px 0 4px;font-size:14px">'+esc(f)+' <span class="sev '+(r.scripts[f].status==='changed'?'verify':'info')+'">'+r.scripts[f].status+'</span></h4>'+codeDiffHtml(r.scripts[f].diff,null,f)).join(''):'<div class="empty">The code is identical in these two versions.</div>';
+  if(r.diff.counts.total===0&&changed.length) h+='<p class="hint">The code changed but the mapping did not. That can be fine (a refactor), or the mapping may need a closer look.</p>';
+  $('diffOut').innerHTML=h;
+}
+$('cmpBtn').onclick=()=>work('Comparing...',showChanges);
+async function buildMapping(){
+  await work('Reading the mapping tables...',async()=>{ if(!(await saveAnswer('code_to_mapping',true))) return; const r=await call('POST','/api/job/'+job+'/parse_reply',{note:$('vnote').value}); if(r.upload_result.new) $('vnote').value=''; toast(r.upload_result.message); await load(job); $('mapOut').scrollIntoView({behavior:'smooth'}) });
+}
+startPage(async name=>{ if(!$('sources').innerHTML){mountSources('sources',reload);mountPanel('cp_code_to_mapping','code_to_mapping','Copilot: write the mapping tables','<button onclick="buildMapping()">Build mapping from reply</button>',true)} await load(name) });
+</script></body></html>

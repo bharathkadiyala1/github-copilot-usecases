@@ -9,18 +9,24 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import core
+import workflows
 
 CFG = core.Settings()
 MAX_BODY = 20 * 1024 * 1024
+# address -> file in ui/
+PAGES = {"/": "home.html", "/parity": "index.html", "/understand": "understand.html", "/mapping-to-code": "mapping-to-code.html",
+         "/code-to-mapping": "code-to-mapping.html", "/reconcile": "reconcile.html", "/report": "report.html"}
 
 
 def api(method, path, query, body):
     """Return (status, payload). payload is a dict, or a (content_type, text) tuple."""
     parts = [p for p in path.split("/") if p][1:]          # drop leading 'api'
     if method == "GET" and parts == ["settings"]:
-        return {"reviewer": CFG.reviewer, "target": CFG.target, "copilot_command": bool(CFG.copilot_cmd)}
+        return {"reviewer": CFG.reviewer, "target": CFG.target, "copilot_command": bool(CFG.copilot_cmd), "dialect": CFG.dialect}
     if method == "GET" and parts == ["jobs"]:
         return {"jobs": core.list_jobs(CFG)}
+    if method == "POST" and parts == ["reconcile"]:
+        return core.reconcile(CFG, body.get("expected", ""), body.get("actual", ""), body.get("keys", ""), body.get("tolerance", "0"))
     if method == "POST" and parts == ["jobs"]:
         core.create_job(CFG, body.get("name", ""))
         return {"ok": True}
@@ -29,9 +35,23 @@ def api(method, path, query, body):
         if method == "GET" and action == "":
             return core.job_state(CFG, name)
         if method == "GET" and action == "prompt":
-            return {"prompt": core.build_prompt(CFG, name, query.get("step", ""))}
+            return {"prompt": core.build_prompt(CFG, name, query.get("step", ""), query)}
+        if method == "GET" and action == "scan":
+            return workflows.scan_job(CFG, name, log=query.get("quiet") != "1")
+        if method == "GET" and action == "mapping":
+            return workflows.mapping_state(CFG, name)
+        if method == "GET" and action == "derived":
+            return workflows.derived_state(CFG, name)
+        if method == "GET" and action == "download":
+            return ("bytes",) + workflows.download(CFG, name, query.get("what", ""), query.get("version"))
+        if method == "GET" and action == "derived_compare":
+            return workflows.derived_compare(CFG, name, query.get("from"), query.get("to"))
+        if method == "GET" and action == "mapping_compare":
+            return workflows.compare_versions(CFG, name, query.get("from"), query.get("to"))
         if method == "GET" and action == "audit":
             return {"audit": core.read_audit(CFG, name)}
+        if method == "GET" and action == "report_data":
+            return core.report_data(CFG, name)
         if method == "GET" and action == "report":
             return ("text/markdown; charset=utf-8", core.build_report(CFG, name))
         if method == "POST":
@@ -46,6 +66,12 @@ def api(method, path, query, body):
                         meta[key] = str(body[key])
                 core.save_meta(path, meta)
                 return {"ok": True}
+            if action == "mapping_upload":
+                return workflows.save_mapping_upload(CFG, name, body.get("filename", ""), body.get("b64", ""), body.get("note", ""))
+            if action == "save_generated":
+                return workflows.save_generated(CFG, name, body.get("target", ""))
+            if action == "parse_reply":
+                return workflows.parse_reply(CFG, name, body.get("note", ""))
             if action == "use_generated_input":
                 path = core.job_dir(CFG, name)
                 answer = core.read_text(path / "answers" / "gen_input.md")
@@ -96,10 +122,28 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def send_static(self, name):
+        """Serve one file from ui/ (css, js, svg, png). Names with slashes are refused."""
+        kinds = {"css": "text/css; charset=utf-8", "js": "application/javascript; charset=utf-8",
+                 "svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
+        target = core.ROOT / "ui" / name
+        kind = kinds.get(name.rsplit(".", 1)[-1])
+        if not (core.FILE_RE.match(name) and kind and target.is_file()):
+            return self.send(404, "text/plain", "not found")
+        data = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", kind)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
     def handle_any(self, method):
         url = urlparse(self.path)
-        if method == "GET" and url.path in ("/", "/index.html"):
-            return self.send(200, "text/html; charset=utf-8", (core.ROOT / "ui" / "index.html").read_text(encoding="utf-8"))
+        if method == "GET" and url.path in PAGES:
+            return self.send(200, "text/html; charset=utf-8", (core.ROOT / "ui" / PAGES[url.path]).read_text(encoding="utf-8"))
+        if method == "GET" and url.path.startswith("/ui/"):
+            return self.send_static(url.path[len("/ui/"):])
         if not url.path.startswith("/api/"):
             return self.send(404, "text/plain", "not found")
         # Block other websites from calling this local API from a browser.
@@ -113,6 +157,14 @@ class Handler(BaseHTTPRequestHandler):
                     raise core.UserError("File too large for the page (limit 20 MB).")
                 body = json.loads(self.rfile.read(length) or b"{}")
             result = api(method, url.path, {k: v[0] for k, v in parse_qs(url.query).items()}, body)
+            if isinstance(result, tuple) and result[0] == "bytes":
+                _, filename, ctype, data = result
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Content-Disposition", 'attachment; filename="%s"' % filename)
+                self.end_headers()
+                return self.wfile.write(data)
             if isinstance(result, tuple):
                 return self.send(200, result[0], result[1])
             self.send(200, "application/json", json.dumps(result))
@@ -132,7 +184,7 @@ def main():
     CFG.jobs_dir.mkdir(parents=True, exist_ok=True)
     server = HTTPServer((CFG.host, CFG.port), Handler)
     url = "http://%s:%d" % (CFG.host, CFG.port)
-    print("Parity workbench running at %s  (Ctrl+C to stop)" % url)
+    print("BMO ParityPilot running at %s  (Ctrl+C to stop)" % url)
     if "--no-browser" not in sys.argv:
         try:
             webbrowser.open(url)

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Code Insights &middot; BMO ParityPilot</title><link rel="stylesheet" href="/ui/style.css"></head><body>
+<div class="top"><img id="logo" alt="logo"><div class="brand"><b>BMO ParityPilot</b><small>AI-ASSISTED MODERNIZATION, WITH PROOF</small></div></div>
+<div class="page">
+  <h1 class="page-title">Code Insights</h1>
+  <p class="lead">Attach the old script. Get the facts in plain terms, then a business-friendly explanation from Copilot.</p>
+  <div class="jobbar" id="jobbar"></div>
+  <div class="card" id="nojob" hidden><div class="empty">Create a migration above to begin.</div></div>
+
+  <div id="content" hidden>
+    <div class="card"><h2>1. Attach the script</h2><div id="sources"></div></div>
+
+    <div class="card"><h2>2. What the script is made of <span class="pill">measured, no AI</span></h2>
+      <div class="row"><button id="scanBtn" class="alt">Re-run analysis</button><span class="hint">Runs automatically when a script is attached. Counts and pattern checks only.</span></div>
+      <div id="scanOut"></div></div>
+
+    <div class="card"><h2>3. Plain-English explanation <span class="pill">Copilot, reviewed by a person</span></h2>
+      <div class="hint">Business rules, step-by-step flow, a glossary and test ideas, written so a non-programmer can follow.</div>
+      <div id="cp_explain"></div>
+      <div id="explainView"></div>
+      <div class="row"><input type="text" id="who" placeholder="Your name" style="width:180px"><input type="text" id="note" placeholder="Comment (optional)" style="flex:1">
+        <button id="approveExplain">I reviewed it: Sign off explanation</button><span class="pill" id="explainState"></span></div></div>
+
+    <div class="card"><h2>Next</h2><div class="row"><a class="btn" href="/code-to-mapping">Build a mapping document from this code &rarr;</a><span id="reportBtn"></span></div></div>
+  </div>
+</div>
+<footer class="foot">Mock data only &middot; AI-assisted, human-approved &middot; every action is recorded in the audit trail</footer>
+<div id="msg"></div>
+<script src="/ui/md.js"></script><script src="/ui/nav.js"></script><script src="/ui/common.js"></script>
+<script>
+mainNav('/understand'); loadLogo();
+async function reload(){ await load(job) }
+function scanHtml(s){
+  const t=s.total; let h='<div class="plain">'+esc(s.summary)+'</div>'+
+   tiles([[t.lines,'Lines'],[t.code_lines,'Lines of code'],[t.tables_read.length,'Tables read'],[t.tables_written.length+t.tables_created.length,'Tables created or written'],[t.joins,'Joins'],[t.rules,'CASE rules'],[t.complexity+' ('+t.score+')','Complexity']]);
+  h+='<h3 style="font-size:15px;margin:14px 0 4px">Files</h3>'+table(['File','Language','Lines','Code','Comments'],s.files.map(f=>[esc(f.file),esc(f.language),f.lines,f.code_lines,f.comments]));
+  h+='<div class="cols2" style="margin-top:14px"><div><b>Reads</b>'+chips(t.tables_read)+'</div><div><b>Creates or writes</b>'+chips(t.tables_created.concat(t.tables_written.filter(x=>t.tables_created.indexOf(x)<0)))+'</div></div>';
+  h+='<h3 style="font-size:15px;margin:18px 0 4px">Things to watch ('+t.high+' high, '+t.medium+' medium, '+t.low+' low)</h3>';
+  h+=s.findings.length?table(['Level','What','Where','Why it matters','Suggested fix'],s.findings.map(f=>[sev(f.severity),'<b>'+esc(f.title)+'</b>'+(f.snippet?'<br><span class="mono" style="font-size:12px">'+esc(f.snippet)+'</span>':''),esc(f.file+(f.line?':'+f.line:'')),esc(f.why),esc(f.fix)])):'<div class="empty">Nothing risky found by the pattern checks.</div>';
+  const hc=s.files.reduce((a,f)=>a.concat(f.hardcoded.map(h=>[esc(h.kind),'<span class="mono">'+esc(h.value)+'</span>',esc(f.file+':'+h.line)])),[]);
+  if(hc.length) h+='<details><summary>Hardcoded values found ('+hc.length+')</summary>'+table(['Kind','Value','Where'],hc)+'</details>';
+  h+='<p class="hint">Facts come from pattern matching, not a full parser, so counts are approximate. They are best for SQL, Python and SAS.</p>';
+  return h;
+}
+async function load(name){
+  const s=await call('GET','/api/job/'+name);
+  showSources(s.sources); fillPanel('explain',s.answers.explain);
+  reportLinks('reportBtn');
+  if(s.sources.length){ try{ $('scanOut').innerHTML=scanHtml(await call('GET','/api/job/'+name+'/scan?quiet=1')) }catch(e){ $('scanOut').innerHTML='' } }
+  else $('scanOut').innerHTML='<div class="empty">Attach a script above and the analysis appears here.</div>';
+  const r=s.answers.explain.trim(); $('explainView').innerHTML=r?'<div class="readbox md">'+md(s.answers.explain)+'</div>':'';
+  const audit=(await call('GET','/api/job/'+name+'/audit')).audit.filter(a=>a.action==='review'&&a.artifact==='explanation');
+  const last=audit.length?audit[audit.length-1]:null;
+  $('explainState').textContent=last?(last.decision==='approve'?'signed off by '+last.reviewer:'rejected'):'not signed off';
+  $('explainState').className='pill '+(last&&last.decision==='approve'?'ok':'warn');
+  $('approveExplain').disabled=!r;
+}
+$('approveExplain').onclick=()=>approveItem('explanation','who','note');
+$('scanBtn').onclick=()=>work('Analyzing...',async()=>{$('scanOut').innerHTML=scanHtml(await call('GET','/api/job/'+job+'/scan'))});
+const extraBtn='';
+startPage(async name=>{ if(!$('sources').innerHTML){mountSources('sources',reload);mountPanel('cp_explain','explain','Copilot: explain it in plain English',extraBtn)} await load(name) });
+</script></body></html>

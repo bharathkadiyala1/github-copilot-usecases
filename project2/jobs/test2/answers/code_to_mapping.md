@@ -1,0 +1,35 @@
+## Source_Target_Mapping
+
+| Map ID | Source System | Source Schema | Source Table | Source Column | Source Data Type | Target Schema | Target Table | Target Column | Target Data Type | Key | Transformation / Business Logic | Nullable | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| M01 | UNKNOWN | UNKNOWN | order_line (l) | order_id | int | UNKNOWN | UNKNOWN (result set of the final SELECT) | order_id | int (inherited from source, not declared) | | Passed through unchanged. It is one of the three GROUP BY columns. Expression: o.order_id. | N | Part of the source PK (order_id, line_no), so it cannot be NULL. The result is sorted by this column. |
+| M02 | UNKNOWN | UNKNOWN | order_line (l), product (p), customer (c) | qty, price, tier, promo_code | int, numeric(10,2), text, text | UNKNOWN | UNKNOWN (result set of the final SELECT) | subtotal | UNKNOWN (derived numeric, not declared) | | Sum of the line net prices per order. Line net = ROUND(qty * price * (1 - disc_pct), 2), rounded to the cent with ties away from zero. disc_pct = LEAST(vol_pct + tier_pct + promo_pct, 0.15). vol_pct: qty >= 50 gives 0.10, qty >= 20 gives 0.05, qty >= 10 gives 0.02, else 0. tier_pct: GOLD gives 0.05, SILVER gives 0.02, else 0. promo_pct: SAVE10 gives 0.10, SAVE5 gives 0.05, else 0. Expression: SUM(net). | Y | NULL when every line of the order has a NULL qty. Promo matching is exact and case-sensitive. |
+| M03 | - | - | order_tot (o), derived from M02 | subtotal | UNKNOWN (derived numeric) | UNKNOWN | UNKNOWN (result set of the final SELECT) | shipping | UNKNOWN (derived numeric, not declared) | | Free shipping at 100 or more, otherwise a flat 9.99. Expression: CASE WHEN o.subtotal >= 100 THEN 0 ELSE 9.99 END. | N | 9.99 and 100 are hardcoded. A NULL subtotal falls into the 9.99 branch. The two branches may display with different scales (UNKNOWN). |
+| M04 | UNKNOWN | UNKNOWN | tax_rate (t), order_tot (o) | rate, subtotal | numeric(5,4), UNKNOWN (derived numeric) | UNKNOWN | UNKNOWN (result set of the final SELECT) | tax | UNKNOWN (derived numeric, not declared) | | Tax on goods plus shipping at the customer's province rate, rounded to the cent. Expression: ROUND((o.subtotal + shipping) * t.rate, 2), where shipping is the M03 expression. | Y | NULL when the subtotal is NULL. QC is seeded as 0.14975, which has more than the 4 decimals of numeric(5,4). What is stored depends on the engine (UNKNOWN). |
+| M05 | UNKNOWN | UNKNOWN | product (p), order_line (l), order_tot (o) | cost, qty, subtotal | numeric(10,2), int, UNKNOWN (derived numeric) | UNKNOWN | UNKNOWN (result set of the final SELECT) | margin_pct | UNKNOWN (derived numeric, not declared) | | Profit as a percent of the goods total, excluding shipping and tax, to 1 decimal. Expression: ROUND((o.subtotal - o.total_cost) / NULLIF(o.subtotal, 0) * 100, 1), where total_cost = SUM(qty * cost). | Y | NULL when the subtotal is 0 or NULL. Line cost is not rounded. |
+| M06 | - | - | order_tot (o) | subtotal, total_cost | UNKNOWN (derived numeric) | UNKNOWN | UNKNOWN (result set of the final SELECT) | margin_flag | UNKNOWN (text literal, length not declared) | | If the unrounded margin ratio is below 0.10 then REVIEW else OK. Expression: CASE WHEN (o.subtotal - o.total_cost) / NULLIF(o.subtotal, 0) < 0.10 THEN 'REVIEW' ELSE 'OK' END. | N | Uses the unrounded ratio, not margin_pct. A NULL ratio gives OK. |
+
+## Joins_Filters
+
+| Seq | Type | Rule Name | Left Table (Alias) | Right Table (Alias) | Join Type | Join Condition / Filter Expression | Business Logic / Rationale | Applies To Map IDs |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Driver | Read all order lines | order_line (l) | - | - | FROM order_line l (no WHERE or HAVING anywhere in the query) | Every order line is the starting set. There is no date, status or order filter. | All |
+| 2 | Join | Attach customer | order_line (l) | customer (c) | INNER (plain JOIN) | USING (customer_id), meaning l.customer_id = c.customer_id | Brings in tier (loyalty discount) and province (tax). A line with a NULL or unknown customer_id is dropped silently. | M02, M04 |
+| 3 | Join | Attach product | order_line (l) | product (p) | INNER (plain JOIN) | USING (sku), meaning l.sku = p.sku | Brings in price and cost. A line with a NULL or unknown sku is dropped silently. | M02, M05, M06 |
+| 4 | Aggregation | Order totals | priced (derived from l, c, p) | - | - | GROUP BY order_id, customer_id, province; SUM(net) AS subtotal; SUM(line_cost) AS total_cost | One row per order, customer and province. If one order has lines for different customers, it comes out as several rows with the same order_id. | All |
+| 5 | Join | Attach tax rate | order_tot (o) | tax_rate (t) | INNER (plain JOIN) | USING (province), meaning o.province = t.province | Gets the tax rate. An order whose province is not in tax_rate (for example MB, or lowercase on) is dropped silently. | All |
+| 6 | Target Load | Output sorted by order | order_tot (o) joined to tax_rate (t) | - | - | ORDER BY o.order_id | The final SELECT only returns a result set. There is no INSERT or CREATE for a target, so nothing is saved. Ties on order_id have no defined order. | All |
+
+## Assumptions and open questions
+- The source system and source schema are not visible in the code, so they are UNKNOWN for every column.
+- No target table, schema or file is written. The final SELECT only returns a result set, so the target schema and target table are UNKNOWN. Only tax_rate is written, and only by the seed INSERT of four rows in the script.
+- Target data types are not declared anywhere. The types shown are inherited from the source columns or derived, and are marked as such.
+- Keys: the target has no declared keys. order_id is part of the source primary key (order_id, line_no).
+- The SQL dialect is UNKNOWN. The syntax is PostgreSQL-compatible. The comment on Rule 5 (ties away from zero) holds for PostgreSQL numeric. For other engines it is UNKNOWN.
+- The code has no WHERE, HAVING or Dedup rule. Rows are removed only by the inner joins (steps 2, 3 and 5).
+- Nullable is worked out from the code. subtotal, tax and margin_pct can be NULL when qty is NULL (the CHECK lets NULL pass). customer_id and sku are nullable in order_line.
+- Hardcoded values are the discount rates (0.02, 0.05, 0.10), the cap (0.15), the shipping fee (9.99), the free-shipping limit (100), the review limit (0.10), the quantity cut-offs (10, 20, 50), the promo codes and the tax rates (0.13, 0.12, 0.05, 0.14975). Ask the business owner whether these should come from tables.
+- Open question: what is the correct QC rate, 0.14975 or the value the column actually stores?
+- Open question: should lines with no matching customer, product or province be reported rather than dropped?
+- Open question: which system loads customer, product and order_line, and how often? UNKNOWN.
+- Open question: what is the currency? Nothing in the code names it, so it is UNKNOWN.

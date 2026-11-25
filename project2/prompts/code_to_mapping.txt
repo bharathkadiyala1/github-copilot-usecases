@@ -1,0 +1,33 @@
+Reverse-engineer a source-to-target mapping document from the code below. All data is mock data.
+Do not guess. If a value cannot be seen in the code, write UNKNOWN. Never invent table or column names.
+
+Reply with EXACTLY two markdown tables, then one extra section. No other tables.
+
+TABLE 1, titled "## Source_Target_Mapping", one row per target column, with these exact column headers:
+| Map ID | Source System | Source Schema | Source Table | Source Column | Source Data Type | Target Schema | Target Table | Target Column | Target Data Type | Key | Transformation / Business Logic | Nullable | Notes |
+- Map IDs run M01, M02, M03 ... in target column order.
+- Key is PK, FK or blank. Nullable is Y or N. Use - for source fields when the value is generated (for example a load timestamp).
+- Schema columns: leave the cell blank when the code does not name a schema (for example FROM order_line, with no schema in front). Do NOT write UNKNOWN for a missing schema.
+- Source Column: the main source column. If an expression uses several columns, name the main one and list the rest inside the logic text.
+- Use UNKNOWN only for data types that the code does not declare.
+- Describe the logic in plain words plus the expression (for example: If CURRENCY_CD='CAD' then CLOSING_BAL else CLOSING_BAL * FX_RATE).
+
+TABLE 2, titled "## Joins_Filters", rules in the order the code applies them, with these exact column headers:
+| Seq | Type | Rule Name | Left Table (Alias) | Right Table (Alias) | Join Type | Join Condition / Filter Expression | Business Logic / Rationale | Applies To Map IDs |
+- Type is one of Driver, Join, Filter, Dedup, Aggregation, Target Load.
+- Put the alias in brackets after each table, as in CBS.ACCOUNT (a).
+- Applies To Map IDs lists Map IDs separated by commas, or All.
+
+Keep each cell clean:
+- Source Table: ONE table name only. If several tables feed a column, name the main one and mention the others in Notes.
+- Join Type: exactly one of INNER, LEFT, RIGHT, FULL, CROSS, or - when it is not a join. No explanations.
+- Join Condition / Filter Expression: SQL copied from the code, nothing else. Put any explanation in Business Logic / Rationale.
+Do not use the pipe character inside any cell.
+
+Then add "## Assumptions and open questions" as bullets.
+
+FACTS ALREADY MEASURED FROM THE CODE:
+{facts}
+
+CODE:
+{source}

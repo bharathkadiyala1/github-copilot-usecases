@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Evidence report &middot; BMO ParityPilot</title><link rel="stylesheet" href="/ui/style.css">
+<style>
+.wrap{max-width:1000px;margin:0 auto;padding:8px 22px 30px}
+.nav{position:sticky;top:61px;background:var(--bg);padding:10px 0;display:flex;gap:6px;flex-wrap:wrap;z-index:4;border-bottom:1px solid var(--line)}
+.nav a{padding:5px 12px;border-radius:16px;background:#fff;border:1px solid var(--line);text-decoration:none;font-size:13px;color:var(--navy)}
+.nav a:hover{background:#e8f3fb}
+h1.title{font-size:26px;margin:22px 0 2px;color:var(--navy)}.sub{color:var(--mute);margin:0 0 14px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:800px){.two{grid-template-columns:1fr}}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:4px 12px;font-size:13px}.kv span{color:var(--mute)}
+.mono{font-family:var(--mono);font-size:12.5px}
+.diffcell{background:#fdecea}
+section.card{scroll-margin-top:120px}
+</style></head><body>
+<div class="top"><img id="logo" alt="logo"><div class="brand"><b>BMO ParityPilot</b><small>EVIDENCE REPORT</small></div>
+  <button class="alt noprint" onclick="window.print()">Print / Save as PDF</button>
+  <a id="dl" class="btn alt noprint" href="#" download>Download .md</a>
+  <a class="btn noprint" href="/parity">&larr; Workbench</a></div>
+<div class="wrap" id="root"><p class="hint">Loading...</p></div>
+<footer class="foot">Mock data only &middot; AI-assisted, human-approved &middot; generated <span id="gen"></span></footer>
+<script src="/ui/md.js"></script><script src="/ui/nav.js"></script>
+<script>
+const job=new URLSearchParams(location.search).get('job')||'';
+const e=escapeHtml;
+mainNav('');
+loadLogo();
+document.getElementById('dl').href='/api/job/'+encodeURIComponent(job)+'/report';document.getElementById('dl').download=job+'_parity_report.md';
+function empty(t){return '<div class="empty">'+e(t)+'</div>'}
+function ptable(header,rows,other){return '<table><tr>'+header.map(c=>'<th>'+e(c)+'</th>').join('')+'</tr>'+rows.map((r,i)=>'<tr>'+r.map((v,j)=>{const o=other&&other[i]&&other[i][j];return '<td'+(o!==undefined&&o!==v?' class="diffcell"':'')+'>'+e(v)+'</td>'}).join('')+'</tr>').join('')+'</table>'}
+function render(d){
+  document.title='Evidence report: '+d.job;document.getElementById('gen').textContent=d.generated;
+  const c=d.check, rv=d.results_review;
+  let v;
+  if(!c) v=['none','No old-vs-new comparison yet','Use "Modernization Studio" to compare a legacy job with its replacement. The sections below cover what this job has so far.'];
+  else if(c.unverified) v=['warn',(c.passed?'PASS':'FAIL')+' - UNVERIFIED','The legacy output was predicted by Copilot, not produced by the real legacy system. This is not proof of parity.'];
+  else v=[c.passed?'pass':'fail',c.passed?'PASS':'FAIL',c.passed?'The new job reproduces the legacy output on '+c.data_label+'.':c.diff_count+' difference(s) found between the legacy and new outputs.'];
+  let h=`<h1 class="title">${e(d.job)}</h1><p class="sub">${c?'Checked '+e(c.checked_at)+' &middot; ':''}report generated ${e(d.generated)}</p>
+  <nav class="nav noprint"><a href="#summary">Summary</a>${c?'<a href="#diffs">Differences</a><a href="#preview">Output preview</a>':''}${d.scan?'<a href="#script">Script analysis</a>':''}${d.mapping?'<a href="#mapping">Mapping document</a>':''}${d.derived?'<a href="#derived">Mapping from code</a>':''}<a href="#rules">Business rules</a><a href="#code">New code</a><a href="#legacy">Legacy script</a><a href="#cloud">Cloud starter</a><a href="#audit">Audit trail</a></nav>
+  <section id="summary" class="card"><div class="verdict ${v[0]}">${e(v[1])}<small>${e(v[2])}</small></div>`;
+  if(c){
+    h+=`<div class="tiles"><div class="tile"><b>${c.expected_rows}</b><span>Legacy rows</span></div><div class="tile"><b>${c.actual_rows}</b><span>New job rows</span></div>
+    <div class="tile"><b>${c.diff_count}</b><span>Differences</span></div><div class="tile"><b>${Object.keys(c.columns_diverged).length}</b><span>Columns that differ</span></div></div>
+    <div class="kv"><span>Data</span><div>${e(c.data_label)}</div><span>Compared</span><div>${c.key_columns.length?'by key '+e(c.key_columns.join(', ')):'row by row'}, tolerance ${e(c.tolerance)}</div>
+    <span>Input origin</span><div>${e(c.input_origin)}</div><span>Legacy output origin</span><div>${e(c.expected_origin)}</div>
+    <span>SHA-256 (input)</span><div class="mono">${e(c.input_sha.slice(0,16))}</div><span>SHA-256 (legacy)</span><div class="mono">${e(c.expected_sha.slice(0,16))}</div><span>SHA-256 (new)</span><div class="mono">${e(c.modern_sha.slice(0,16))}</div></div>`;
+    if(!c.unverified&&c.data_label==='sample data') h+='<details class="callout small"><summary>&#9888; Passed on generated sample data only</summary>Real data may expose cases the sample missed.</details>';
+  }
+  if(c||d.new_job.trim()) h+=`<div style="margin-top:14px"><b>Sign-off:</b> ${rv?`<span class="pill ${rv.decision==='approve'?'ok':'bad'}" style="margin:0">${rv.decision==='approve'?'Signed off':'Rejected'}</span> by ${e(rv.reviewer)} on ${e(rv.time)}${rv.comment?' - '+e(rv.comment):''}`:'<span class="pill warn" style="margin:0">Not signed off</span>'}
+  &nbsp; <b>New code:</b> <span class="pill ${d.code_approved?'ok':'warn'}" style="margin:0">${d.code_approved?'Signed off':'Not signed off'}</span></div>`;
+  h+='</section>';
+
+  if(c){ h+='<section id="diffs" class="card"><h2>Differences</h2>';
+  if(!c.diffs.length) h+=empty('No differences. Every compared value matched.');
+  else{h+=`<p class="hint">Showing ${c.diffs.length} of ${c.diff_count}. Columns that differ: ${Object.entries(c.columns_diverged).map(([k,n])=>e(k)+' ('+n+')').join(', ')||'-'}</p>`+
+    ptable(['Type','Where','Column','Legacy (expected)','New (actual)'],c.diffs.map(x=>[x.type,x.where,x.column,x.expected,x.actual]))}
+  h+='</section><section id="preview" class="card"><h2>Output preview (first rows)</h2>';
+  if(!c||!c.preview) h+=empty('Run the comparison again to see a preview.');
+  else{const p=c.preview;h+=`<div class="two"><div><b>Legacy output</b>${ptable(p.header,p.expected,p.actual)}</div><div><b>New job output</b>${ptable(p.header,p.actual,p.expected)}</div></div><p class="hint">Red cells differ at the same row position.</p>`}
+  h+='</section>'; }
+
+  const approvals={};d.audit.filter(a=>a.action==='review').forEach(a=>{approvals[a.artifact]=a});
+  const approvalNames={explanation:'Plain-English explanation',derived_mapping:'Mapping built from code',generated_sql:'Generated SQL',generated_pyspark:'Generated PySpark',new_job:'New code',results:'Comparison results'};
+  if(Object.keys(approvals).length) h+='<section id="approvals" class="card"><h2>Sign-offs</h2>'+ptable(['Item','Decision','By','When','Comment'],Object.keys(approvals).map(k=>[approvalNames[k]||k,approvals[k].decision==='approve'?'Signed off':'Rejected',approvals[k].reviewer,approvals[k].time,approvals[k].comment]))+'</section>';
+  if(d.scan){const s=d.scan,t=s.total;h+=`<section id="script" class="card"><h2>Script analysis <span class="pill">measured, no AI</span></h2><div class="plain">${e(s.summary)}</div>`+
+    tiles([[t.lines,'Lines'],[t.code_lines,'Lines of code'],[t.tables_read.length,'Tables read'],[t.joins,'Joins'],[t.rules,'CASE rules'],[t.complexity+' ('+t.score+')','Complexity']])+
+    '<h3 style="font-size:15px">Things to watch ('+t.high+' high, '+t.medium+' medium, '+t.low+' low)</h3>'+(s.findings.length?table(['Level','What','Where','Why it matters','Suggested fix'],s.findings.slice(0,25).map(f=>[sev(f.severity),'<b>'+e(f.title)+'</b>',e(f.file+(f.line?':'+f.line:'')),e(f.why),e(f.fix)])):'<div class="empty">Nothing risky found.</div>')+'</section>'}
+  if(d.answers.explain.trim()) h+=`<section id="explain" class="card"><h2>Plain-English explanation <span class="pill">from Copilot, reviewed by a person</span></h2><div class="md">${md(d.answers.explain)}</div></section>`;
+  if(d.mapping){const m=d.mapping,s=m.summary,srcs=Object.keys(s.source_tables);h+=`<section id="mapping" class="card"><h2>Mapping document <span class="pill">${e(m.model.filename||'')}</span></h2>`+
+    tiles([[s.columns,'Target columns'],[s.rules,'Rules'],[srcs.length,'Source tables'],[Object.values(s.joins).reduce((a,b)=>a+b,0),'Joins'],[s.filters,'Filters']])+
+    (m.versions&&m.versions.length>1?'<h3 style="font-size:15px">Version history</h3>'+table(['Version','Uploaded','By','Note','Changes vs previous'],m.versions.slice().reverse().map(v=>['v'+v.n,e((v.uploaded||'').replace('T',' ')),e(v.by||''),e(v.note||''),e(v.summary)]))+'<h3 style="font-size:15px">Latest changes (v'+(m.version-1)+' to v'+m.version+')</h3>'+diffHtml(m.diff):'')+
+    '<h3 style="font-size:15px">Checks on the document</h3>'+lintHtml(m.lint)+(m.reference_coverage?'<h3 style="font-size:15px">Reference SQL in the workbook vs its own rules</h3>'+coverageHtml(m.reference_coverage,'Reference SQL'):'')+
+    Object.keys(m.generated).map(t=>'<h3 style="font-size:15px">Generated '+(t==='sql'?'SQL':'PySpark')+' <span class="pill '+(m.generated[t].approved?'ok':'warn')+'">'+(m.generated[t].approved?'signed off':'not signed off')+'</span></h3>'+coverageHtml(m.generated[t].coverage,'Mapping items found in the generated code')+'<details><summary>Show the code</summary><div class="md"><pre><code>'+e(m.generated[t].code)+'</code></pre></div></details>').join('')+'</section>'}
+  if(d.derived){const m=d.derived;h+=`<section id="derived" class="card"><h2>Mapping built from code <span class="pill ${m.approved?'ok':'warn'}">${m.approved?'signed off':'not signed off'}</span></h2>`+
+    (m.versions&&m.versions.length>1?'<h3 style="font-size:15px">Version history</h3>'+table(['Version','Built','By','Note','What changed'],m.versions.slice().reverse().map(v=>['v'+v.n,e((v.uploaded||'').replace('T',' ')),e(v.by||''),e(v.note||''),e(v.summary)]))+'<h3 style="font-size:15px">Latest mapping changes (v'+(m.version-1)+' to v'+m.version+')</h3>'+diffHtml(m.diff):'')+
+    '<h3 style="font-size:15px">Source to target mapping</h3>'+mappingTable(m.model)+'<h3 style="font-size:15px">Joins, filters and rules</h3>'+rulesTable(m.model)+'<h3 style="font-size:15px">Checks on the mapping</h3>'+lintHtml(m.lint)+(m.coverage?'<h3 style="font-size:15px">Rule coverage: does the mapping match the code?</h3>'+coverageHtml(m.coverage,'Mapping items found in the code'):'')+'</section>'}
+  h+=`<section id="rules" class="card"><h2>Business rules and technical debt <span class="pill">from Copilot, reviewed by a person</span></h2>${d.answers.analyze.trim()?'<div class="md">'+md(d.answers.analyze)+'</div>':empty('No analysis saved. Use "Copilot: explain the rules and tech debt" in the workbench.')}</section>`;
+  h+=`<section id="code" class="card"><h2>New code <span class="pill ${d.code_approved?'ok':'warn'}">${d.code_approved?'signed off':'not signed off'}</span></h2>${d.new_job.trim()?'<div class="md"><pre><code>'+e(d.new_job)+'</code></pre></div>':empty('No code yet.')}</section>`;
+  const srcs=Object.entries(d.sources);
+  h+=`<section id="legacy" class="card"><h2>Legacy script</h2>${srcs.length?srcs.map(([n,t])=>`<details><summary>${e(n)}</summary><div class="md"><pre><code>${e(t)}</code></pre></div></details>`).join(''):empty('No legacy script saved.')}</section>`;
+  h+=`<section id="cloud" class="card"><h2>Cloud starter code <span class="pill">review only, never run</span></h2>${d.answers.cloud.trim()?'<div class="md">'+md(d.answers.cloud)+'</div>':empty('Not generated. Optional.')}</section>`;
+  h+=`<section id="audit" class="card"><h2>Audit trail</h2>${d.audit.length?ptable(['Time','Who','Action','Item','Decision','SHA-256','Comment'],d.audit.slice().reverse().map(r=>[r.time,r.reviewer,r.action,r.artifact,r.decision,r.sha256.slice(0,12),r.comment])):empty('Nothing recorded yet.')}</section>`;
+  document.getElementById('root').innerHTML=h;
+}
+fetch('/api/job/'+encodeURIComponent(job)+'/report_data').then(r=>r.json().then(d=>({ok:r.ok,d}))).then(x=>{
+  if(!x.ok) document.getElementById('root').innerHTML='<div class="card"><div class="empty">'+e(x.d.error||'Could not load the report.')+'</div></div>'; else render(x.d)
+}).catch(err=>{document.getElementById('root').innerHTML='<div class="card"><div class="empty">'+e(err.message)+'</div></div>'});
+</script></body></html>

@@ -1,0 +1,99 @@
+{
+  "mappings": [
+    {
+      "id": "M01",
+      "source_system": "CSV file read from sys.argv[1]",
+      "source_schema": "",
+      "source_table": "Input CSV (path from sys.argv[1]; file name UNKNOWN)",
+      "source_column": "account_id",
+      "source_type": "UNKNOWN",
+      "target_schema": "",
+      "target_table": "Output CSV (path from sys.argv[2]; file name UNKNOWN)",
+      "target_column": "account_id",
+      "target_type": "UNKNOWN",
+      "key": "PK",
+      "logic": "Group key, copied as-is with no trim or case change. Output rows are sorted ascending as strings: sorted(totals).",
+      "nullable": "N",
+      "notes": "Key is implied only by grouping (one output row per distinct account_id). No key is declared in the code. An empty-string account_id is accepted as a group."
+    },
+    {
+      "id": "M02",
+      "source_system": "CSV file read from sys.argv[1]",
+      "source_schema": "",
+      "source_table": "Input CSV (path from sys.argv[1]; file name UNKNOWN)",
+      "source_column": "account_id",
+      "source_type": "UNKNOWN",
+      "target_schema": "",
+      "target_table": "Output CSV (path from sys.argv[2]; file name UNKNOWN)",
+      "target_column": "txn_count",
+      "target_type": "UNKNOWN",
+      "key": "",
+      "logic": "Count of non-skipped rows per account_id: counts[account_id] = counts.get(account_id, 0) + 1. Rows with a blank amount are not counted.",
+      "nullable": "N",
+      "notes": "Written as a plain integer. Zero, negative and duplicate rows are all counted. Other columns used for the skip test: amount."
+    },
+    {
+      "id": "M03",
+      "source_system": "CSV file read from sys.argv[1]",
+      "source_schema": "",
+      "source_table": "Input CSV (path from sys.argv[1]; file name UNKNOWN)",
+      "source_column": "amount",
+      "source_type": "UNKNOWN",
+      "target_schema": "",
+      "target_table": "Output CSV (path from sys.argv[2]; file name UNKNOWN)",
+      "target_column": "total_cad",
+      "target_type": "UNKNOWN",
+      "key": "",
+      "logic": "Per row: amt = float(amount). If currency = 'USD' then amt = round(amt * RATE, 2), with RATE hardcoded as 1.35; else amt unchanged, so any other currency value is treated as CAD. Then sum per account_id: totals[account_id] = totals.get(account_id, 0.0) + amt. Written as the string \"%.2f\" % totals[account_id].",
+      "nullable": "N",
+      "notes": "Other columns used: currency, account_id. Float arithmetic, with rounding applied per USD row and again at output. Can output -0.00. The hardcoded rate has no effective date."
+    }
+  ],
+  "rules": [
+    {
+      "seq": "1",
+      "type": "Driver",
+      "name": "Read input rows",
+      "left": "Input CSV (f)",
+      "right": "-",
+      "join_type": "-",
+      "expr": "for row in csv.DictReader(f)",
+      "logic": "Reads every data row of the input file, using the header row as column names. No joins exist in the code.",
+      "applies": "All"
+    },
+    {
+      "seq": "2",
+      "type": "Filter",
+      "name": "Skip blank amounts",
+      "left": "Input CSV (row)",
+      "right": "-",
+      "join_type": "-",
+      "expr": "if row[\"amount\"] == \"\": continue",
+      "logic": "Rows with an empty amount are dropped silently. They are not counted, not rejected and not logged. A whitespace-only amount is not dropped and raises an error.",
+      "applies": "All"
+    },
+    {
+      "seq": "3",
+      "type": "Aggregation",
+      "name": "Sum and count per account",
+      "left": "Input CSV (row)",
+      "right": "-",
+      "join_type": "-",
+      "expr": "totals[row[\"account_id\"]] = totals.get(row[\"account_id\"], 0.0) + amt; counts[row[\"account_id\"]] = counts.get(row[\"account_id\"], 0) + 1",
+      "logic": "Equivalent to GROUP BY account_id with COUNT and SUM of the CAD-converted amount. USD amounts are converted first (see M03).",
+      "applies": "M01, M02, M03"
+    },
+    {
+      "seq": "4",
+      "type": "Target Load",
+      "name": "Write output CSV",
+      "left": "Totals and counts dictionaries (totals, counts)",
+      "right": "Output CSV (w)",
+      "join_type": "-",
+      "expr": "for acct in sorted(totals): w.writerow([acct, counts[acct], \"%.2f\" % totals[acct]])",
+      "logic": "Writes the header account_id, txn_count, total_cad, then one row per account in ascending string order. The file at sys.argv[2] is overwritten.",
+      "applies": "All"
+    }
+  ],
+  "reference_sql": ""
+}

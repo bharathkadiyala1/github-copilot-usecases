@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BMO ParityPilot</title><link rel="stylesheet" href="/ui/style.css">
+<style>
+/* landing page only */
+.lp{max-width:1160px;margin:0 auto;padding:0 28px;position:relative}
+.top .toplinks{display:flex;gap:6px;align-items:center}
+.top .toplinks a.l{color:var(--mute);text-decoration:none;font-weight:600;font-size:14px;padding:8px 12px;border-radius:8px}.top .toplinks a.l:hover{background:#eef3f8;color:var(--navy)}
+
+.hero2{background:linear-gradient(130deg,#003c63 0%,#00598f 45%,#0075be 100%);color:#fff;position:relative;overflow:hidden}
+.hero2:before{content:"";position:absolute;inset:0;background:radial-gradient(520px 320px at 88% 12%,#ffffff26,transparent 70%),radial-gradient(520px 380px at 4% 115%,#ed1c2450,transparent 70%)}
+.hero2:after{content:"";position:absolute;inset:0;opacity:.07;background-image:linear-gradient(#fff 1px,transparent 1px),linear-gradient(90deg,#fff 1px,transparent 1px);background-size:44px 44px}
+.hero2 .grid{display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:center;padding:72px 0 96px;position:relative;z-index:1}
+.eyebrow{letter-spacing:.16em;font-size:12px;font-weight:700;color:#bfe1f7}
+.hero2 h1{font-size:50px;line-height:1.06;margin:14px 0 18px;letter-spacing:-.025em;font-weight:750}
+.hero2 .sub{font-size:18px;line-height:1.55;color:#d6eaf7;max-width:540px;margin:0}
+.cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:30px}
+.cta a{text-decoration:none;font-weight:700;font-size:15px;padding:13px 22px;border-radius:10px;transition:transform .12s,box-shadow .12s}
+.cta a:hover{transform:translateY(-2px)}
+.cta .primary{background:#fff;color:#00507f;box-shadow:0 10px 26px #00000033}
+.cta .ghost{border:1.5px solid #ffffff99;color:#fff}.cta .ghost:hover{background:#ffffff1a}
+.tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:26px}.tags span{font-size:12.5px;color:#d6eaf7;border:1px solid #ffffff40;border-radius:20px;padding:4px 12px}
+
+.proof{background:#fff;color:var(--ink);border-radius:18px;box-shadow:0 30px 70px #00000050;padding:20px 22px 40px;position:relative}
+.proof .hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.proof .hd b{color:var(--navy);font-size:15px}.proof .ill{font-size:10.5px;letter-spacing:.1em;font-weight:700;color:var(--mute);background:#eef2f6;border-radius:10px;padding:2px 9px}
+.proof .verdict{font-size:19px;padding:12px 16px;margin:0 0 12px}.proof .verdict small{font-size:12.5px}
+.proof table{font-size:13px}.proof td.bad{background:#fdecea;color:#8a1c14;font-weight:700}.proof td.ok{color:var(--green);font-weight:700}
+.proof .cap{font-size:12px;color:var(--mute);margin:10px 0 0}
+.proof .chip2{position:absolute;right:16px;bottom:-16px;background:var(--red);color:#fff;font-weight:700;font-size:12.5px;padding:8px 14px;border-radius:10px;box-shadow:0 10px 24px #ed1c2466}
+
+.facts{margin:-44px auto 0;position:relative;z-index:2}
+.facts .row4{display:grid;grid-template-columns:repeat(4,1fr);background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 16px 40px #0b2a4a1f}
+.facts .f{padding:22px 24px;border-right:1px solid var(--line)}.facts .f:last-child{border-right:0}
+.facts b{display:block;font-size:19px;color:var(--navy);letter-spacing:-.01em}.facts span{font-size:13px;color:var(--mute)}
+
+section.sec{padding:72px 0 0}
+.sec h2.big{font-size:32px;letter-spacing:-.02em;color:var(--navy);margin:0 0 8px}
+.sec .lede{font-size:16.5px;color:var(--mute);max-width:700px;margin:0 0 28px}
+.kicker{font-size:12px;letter-spacing:.14em;font-weight:700;color:var(--blue);margin-bottom:8px}
+
+.studio{display:grid;grid-template-columns:1.05fr .95fr;gap:0;background:#fff;border:1px solid #b7d9ee;border-radius:20px;overflow:hidden;box-shadow:0 18px 50px #0075be1f}
+.studio .l{padding:40px 42px;background:linear-gradient(160deg,#eaf5fc 0%,#fff 70%)}
+.studio .l h3{font-size:30px;letter-spacing:-.02em;margin:6px 0 12px;color:var(--navy)}
+.studio .l p{color:var(--mute);font-size:16px;margin:0 0 22px}
+.studio .btnrow{display:flex;gap:10px;flex-wrap:wrap}.studio .btnrow a{padding:12px 20px;border-radius:10px;font-weight:700;text-decoration:none;font-size:14.5px}
+.studio .btnrow .p{background:var(--blue);color:#fff}.studio .btnrow .p:hover{background:var(--navy)}.studio .btnrow .s{border:1.5px solid var(--blue);color:var(--blue)}
+.steps6{padding:34px 40px;border-left:1px solid #d6e8f5;display:flex;flex-direction:column;justify-content:center;gap:0}
+.steps6 .s6{display:flex;gap:14px;align-items:flex-start;padding:10px 0;position:relative}
+.steps6 .s6:not(:last-child):after{content:"";position:absolute;left:15px;top:42px;bottom:-8px;width:2px;background:#cfe3f2}
+.steps6 .n{width:32px;height:32px;border-radius:50%;background:var(--blue);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none;font-size:14px;position:relative;z-index:1}
+.steps6 .s6:last-child .n{background:var(--green)}
+.steps6 b{display:block;color:var(--navy);font-size:15px}.steps6 span{font-size:13.5px;color:var(--mute)}
+
+.toolgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.tool{display:flex;flex-direction:column;background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px;text-decoration:none;color:var(--ink);transition:all .15s;box-shadow:0 1px 3px #0b2a4a0d}
+.tool:hover{border-color:var(--blue);box-shadow:0 12px 28px #0075be26;transform:translateY(-3px)}
+.tool .ic{width:46px;height:46px;border-radius:12px;background:#e6f3fb;display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+.tool .ic svg{width:24px;height:24px;stroke:var(--blue);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tool .k{font-size:11px;letter-spacing:.12em;font-weight:700;color:var(--blue)}.tool h3{margin:4px 0 6px;font-size:18px;color:var(--navy)}
+.tool p{margin:0 0 14px;color:var(--mute);font-size:14px;flex:1}.tool .go{color:var(--blue);font-weight:700;font-size:14px}
+
+.trust{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.tr{background:#fff;border:1px solid var(--line);border-radius:16px;padding:26px}
+.tr .ic{width:44px;height:44px;border-radius:50%;background:#fde8e8;display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+.tr:nth-child(2) .ic{background:#e3f4ec}.tr:nth-child(3) .ic{background:#e0effa}
+.tr .ic svg{width:22px;height:22px;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tr h3{margin:0 0 6px;font-size:17px;color:var(--navy)}.tr p{margin:0;color:var(--mute);font-size:14.5px}
+
+.migs{display:grid;grid-template-columns:repeat(auto-fill,minmax(285px,1fr));gap:14px}
+.mig{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+.mig .nm{font:600 14px var(--mono);color:var(--navy);word-break:break-all}.mig .row2{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 12px}
+.mig a{font-size:13.5px;font-weight:700;text-decoration:none;color:var(--blue);margin-right:16px;white-space:nowrap}
+.band{margin-top:80px;background:#06263f;color:#c9dff0}
+.band .lp{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;padding-top:26px;padding-bottom:26px;font-size:13px}
+.band b{color:#fff}
+@media(max-width:980px){.hero2 .grid,.studio{grid-template-columns:1fr}.steps6{border-left:0;border-top:1px solid #d6e8f5}.toolgrid{grid-template-columns:1fr 1fr}.trust{grid-template-columns:1fr}.facts .row4{grid-template-columns:1fr 1fr}.hero2 h1{font-size:38px}.proof .chip2{right:8px}}
+@media(max-width:560px){.toolgrid{grid-template-columns:1fr}.facts .row4{grid-template-columns:1fr}}
+</style></head><body>
+
+<div class="top"><img id="logo" alt="BMO"><div class="brand"><b>BMO ParityPilot</b><small>AI-ASSISTED MODERNIZATION, WITH PROOF</small></div>
+  <div class="toplinks"><a class="l" href="#studio">Studio</a><a class="l" href="#toolkit">Toolkit</a><a class="l" href="#trust">Trust</a><a class="l" href="#migrations">Migrations</a><a class="btn" href="/parity">Open the Studio</a></div></div>
+
+<header class="hero2"><div class="lp"><div class="grid">
+  <div>
+    <div class="eyebrow">LEGACY MODERNIZATION &middot; HUMAN IN THE LOOP</div>
+    <h1>Modernize legacy code.<br>Prove nothing broke.</h1>
+    <p class="sub">Copilot drafts the new code. ParityPilot checks it against the old system, shows what changed in plain language, and records who signed off on every step.</p>
+    <div class="cta"><a class="primary" href="/parity">Open the Modernization Studio &rarr;</a><a class="ghost" href="#toolkit">Explore the toolkit</a></div>
+    <div class="tags"><span>SQL</span><span>Python</span><span>SAS</span><span>COBOL</span><span>PySpark</span><span>Excel mappings</span></div>
+  </div>
+  <div class="proof">
+    <div class="hd"><b>Old system vs new code</b><span class="ill">ILLUSTRATION</span></div>
+    <div class="verdict fail">1 difference found<small>Legacy output vs a first-draft rewrite &middot; 3 of 8 accounts shown</small></div>
+    <table><tr><th>Account</th><th>Legacy</th><th>New code</th><th></th></tr>
+      <tr><td>ACC005</td><td>0.70</td><td>0.70</td><td class="ok">&#10003;</td></tr>
+      <tr><td>ACC006</td><td>2,025.19</td><td>2,025.19</td><td class="ok">&#10003;</td></tr>
+      <tr><td>ACC003</td><td>2,155.10</td><td class="bad">2,155.12</td><td class="bad">&#10005;</td></tr></table>
+    <p class="cap">Built-in demo data. The legacy script rounds on a float; an exact-decimal rewrite does not. The check finds it before go-live.</p>
+    <div class="chip2">Caught before production</div>
+  </div>
+</div></div></header>
+
+<div class="lp facts"><div class="row4">
+  <div class="f"><b>No installs</b><span>Python standard library only. Runs anywhere Python runs.</span></div>
+  <div class="f"><b>Human sign-off</b><span>Every AI draft is reviewed and signed off by a named person.</span></div>
+  <div class="f"><b>Full audit trail</b><span>Every step logged with the file checksum it applied to.</span></div>
+  <div class="f"><b>Stays local</b><span>Nothing leaves your machine. Mock data only.</span></div>
+</div></div>
+
+<div class="lp">
+<section class="sec" id="studio"><div class="kicker">CORE WORKFLOW</div><h2 class="big">One place to take a legacy job all the way to modern code</h2>
+  <p class="lede">The Modernization Studio walks a single legacy job from the old script to signed-off modern code, with a comparison that shows exactly where the two differ.</p>
+  <div class="studio">
+    <div class="l"><div class="kicker">MODERNIZATION STUDIO</div><h3>Legacy to modern, with proof</h3>
+      <p>Attach the old script, the input data and what the old system produced. Ask Copilot for the new code, review it, run it, and compare the results cell by cell. Finish with a sign-off and an evidence report you can share.</p>
+      <div class="btnrow"><a class="p" href="/parity">Open the Studio</a><a class="s" href="#migrations">Continue a migration</a></div></div>
+    <div class="steps6">
+      <div class="s6"><div class="n">1</div><div><b>Legacy script</b><span>Upload or paste the old job. Any language.</span></div></div>
+      <div class="s6"><div class="n">2</div><div><b>Input data</b><span>The data it ran on, or sample data from Copilot.</span></div></div>
+      <div class="s6"><div class="n">3</div><div><b>Legacy output</b><span>What the old system produced for that input.</span></div></div>
+      <div class="s6"><div class="n">4</div><div><b>New code</b><span>Copilot drafts it. A person reviews and signs off.</span></div></div>
+      <div class="s6"><div class="n">5</div><div><b>Compare results</b><span>PASS or FAIL, with the exact differing cells.</span></div></div>
+      <div class="s6"><div class="n">6</div><div><b>Sign off</b><span>Approve and download the evidence report.</span></div></div>
+    </div>
+  </div></section>
+
+<section class="sec" id="toolkit"><div class="kicker">TOOLKIT</div><h2 class="big">Supporting tools for every stage</h2>
+  <p class="lede">Use them on their own, or alongside the Studio. They all share the same migrations, sign-offs and audit trail.</p>
+  <div class="toolgrid">
+    <a class="tool" href="/understand"><div class="ic"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div><span class="k">UNDERSTAND</span><h3>Code Insights</h3><p>Size, tables, joins and risky patterns from a script, plus a plain-English explanation anyone can read.</p><span class="go">Open &rarr;</span></a>
+    <a class="tool" href="/code-to-mapping"><div class="ic"><svg viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg></div><span class="k">DOCUMENT</span><h3>Mapping from Code</h3><p>Rebuild a source-to-target mapping from existing code. Version it and export it as Excel.</p><span class="go">Open &rarr;</span></a>
+    <a class="tool" href="/mapping-to-code"><div class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></div><span class="k">GENERATE</span><h3>Code from Mapping</h3><p>Upload a mapping spreadsheet, check it for gaps, generate SQL or PySpark, and see what changed between versions.</p><span class="go">Open &rarr;</span></a>
+    <a class="tool" href="/reconcile"><div class="ic"><svg viewBox="0 0 24 24"><path d="M7 4l-4 4 4 4M3 8h14M17 20l4-4-4-4M21 16H7"/></svg></div><span class="k">RECONCILE</span><h3>Reconcile</h3><p>Compare any two CSV files, such as source vs target after a migration. No setup needed.</p><span class="go">Open &rarr;</span></a>
+  </div></section>
+
+<section class="sec" id="trust"><div class="kicker">BUILT FOR A REGULATED ENVIRONMENT</div><h2 class="big">AI drafts. Rules check. A person signs off.</h2>
+  <p class="lede">Copilot writes the explanation, mapping or code. ParityPilot measures the facts itself, so the proof does not depend on the AI being right.</p>
+  <div class="trust">
+    <div class="tr"><div class="ic"><svg viewBox="0 0 24 24" stroke="#b42318"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg></div><h3>Human in control</h3><p>New code cannot run until a named person signs it off. Editing it removes the sign-off, so nothing changes silently.</p></div>
+    <div class="tr"><div class="ic"><svg viewBox="0 0 24 24" stroke="#12805c"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg></div><h3>Evidence by default</h3><p>Every prompt, reply, upload and decision is written to an audit trail with checksums, and rolled into one shareable evidence report.</p></div>
+    <div class="tr"><div class="ic"><svg viewBox="0 0 24 24" stroke="#0075be"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div><h3>Stays in your environment</h3><p>Runs locally on standard Python. No installs, no cloud calls. It works with the Copilot you already have, by copy and paste.</p></div>
+  </div></section>
+
+<section class="sec" id="migrations"><div class="kicker">YOUR WORK</div><h2 class="big">Your migrations</h2>
+  <p class="lede">Pick up where you left off. Each migration keeps its files, Copilot replies, versions and sign-offs.</p>
+  <div id="migs" class="migs"><div class="hint">Loading...</div></div></section>
+
+<section class="sec"><details class="card" style="margin:0"><summary style="font-size:16px">Where else this fits (ideas beyond this demo)</summary>
+  <div class="tscroll" style="margin-top:10px"><table>
+    <tr><th>Use case</th><th>Where it fits in a bank</th><th>What gets compared</th></tr>
+    <tr><td>Reconcile source vs target after a migration</td><td>Data warehouse and cloud moves</td><td>Row counts, keys and values (the Reconcile tool)</td></tr>
+    <tr><td>SQL dialect migration (Oracle, Teradata to Snowflake or Postgres)</td><td>Warehouse modernization</td><td>Query results before and after</td></tr>
+    <tr><td>Stored procedure, SAS or COBOL to Python</td><td>Batch job retirement</td><td>Output files of the old and new job</td></tr>
+    <tr><td>Report migration (Excel macro or old tool to new)</td><td>Regulatory and management reporting</td><td>Report totals and detail rows</td></tr>
+    <tr><td>Pricing, fee or rules engine rewrite</td><td>Products and pricing</td><td>Calculated amounts per test case</td></tr>
+    <tr><td>Safety net for AI refactors and query tuning</td><td>Any team using Copilot</td><td>Same rows before and after the change</td></tr>
+    <tr><td>Library and Python version upgrades</td><td>Platform engineering</td><td>Regression outputs</td></tr>
+  </table></div></details></section>
+</div>
+
+<div class="band"><div class="lp"><div><b>BMO ParityPilot</b> &middot; AI-assisted modernization, with proof</div><div>Mock data only &middot; AI-assisted, human-approved &middot; every action is recorded in the audit trail</div></div></div>
+
+<script src="/ui/md.js"></script><script src="/ui/nav.js"></script>
+<script>
+loadLogo();
+const e=escapeHtml;
+fetch('/api/jobs').then(r=>r.json()).then(async d=>{
+  const el=document.getElementById('migs');
+  if(!d.jobs.length){ el.innerHTML='<div class="empty" style="grid-column:1/-1">No migrations yet. Open the Studio and create your first one.</div>'; return }
+  const states=await Promise.all(d.jobs.map(j=>fetch('/api/job/'+encodeURIComponent(j)).then(r=>r.json()).catch(()=>null)));
+  el.innerHTML=d.jobs.map((j,i)=>{
+    const s=states[i]||{}, c=s.last_check, chips=[];
+    chips.push(c?'<span class="sev '+(c.passed?'found':'missing')+'">'+(c.passed?'PASS':'FAIL')+'</span>':'<span class="sev unchecked">Not compared</span>');
+    if(s.results_review&&s.results_review.decision==='approve') chips.push('<span class="sev found">Signed off</span>');
+    if(s.sources&&s.sources.length) chips.push('<span class="sev info">'+s.sources.length+' script'+(s.sources.length>1?'s':'')+'</span>');
+    const q=encodeURIComponent(j);
+    return '<div class="mig"><div class="nm">'+e(j)+'</div><div class="row2">'+chips.join('')+'</div><a href="/parity?job='+q+'">Open in Studio</a><a href="/report?job='+q+'" target="_blank" rel="noopener">Evidence report &#8599;</a></div>';
+  }).join('');
+});
+</script></body></html>

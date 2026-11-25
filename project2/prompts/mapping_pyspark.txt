@@ -1,0 +1,17 @@
+Write PySpark code that implements the source-to-target mapping below. All data is mock data.
+
+Requirements:
+- One Python module with a function build_target(spark, run_date, batch_id) that returns the target DataFrame, plus a small main block that writes it as the rules require (merge or overwrite).
+- Use the DataFrame API (spark.table, join, filter, withColumn, groupBy, Window). No pandas and no UDFs unless unavoidable.
+- Implement EVERY mapping rule and EVERY join/filter rule, in the order given. Do not skip, merge or reinterpret any rule.
+- Produce every target column with .alias("<TARGET_COLUMN>") using the exact target column names.
+- Put a comment on each column with its Map ID (for example # M06) and on each join, filter and dedup with its rule number (for example # Rule 4).
+- Use decimal types for money, never float.
+- Do not invent tables, columns or business rules. If something is missing or contradictory, keep the code as close to the rules as possible and list it under open questions.
+
+Reply in this exact shape:
+1. One fenced code block (```python) with the full module.
+2. A section "## Assumptions and open questions" as bullets.
+3. A section "## Rule traceability" as a table with columns: Rule or Map ID | Where in the code.
+
+{update_block}{mapping}

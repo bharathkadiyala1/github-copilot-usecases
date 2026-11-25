@@ -95,7 +95,7 @@ class ServerTests(unittest.TestCase):
 
     def test_page_loads(self):
         with urllib.request.urlopen(self.base + "/") as r:
-            self.assertIn("Parity Workbench", r.read().decode())
+            self.assertIn("BMO ParityPilot", r.read().decode())
 
     def test_run_blocked_until_approved(self):
         self.call("POST", "/api/jobs", {"name": "gate_job"})
@@ -103,7 +103,7 @@ class ServerTests(unittest.TestCase):
         self.call("POST", "/api/job/gate_job/file", {"kind": "input", "content": "a\n1\n"})
         status, body = self.call("POST", "/api/job/gate_job/run_modern", {})
         self.assertEqual(status, 400)
-        self.assertIn("approve", body["error"].lower())
+        self.assertIn("sign off", body["error"].lower())
 
     def full_flow(self, job, run_legacy):
         if run_legacy:
@@ -176,7 +176,209 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("legacy_etl.py", body["prompt"])
         status, text = self.call("GET", "/api/job/demo_python_pass/report")
-        self.assertIn("Parity report", text)
+        self.assertIn("Evidence report", text)
+
+    def test_report_page_static_files_and_data(self):
+        for path, marker in (("/report?job=demo_python_pass", "Evidence report"), ("/ui/style.css", "--blue"), ("/ui/md.js", "function md")):
+            with urllib.request.urlopen(self.base + path) as r:
+                self.assertIn(marker, r.read().decode())
+        for bad in ("/ui/..%2fcore.py", "/ui/core.py", "/ui/nothere.css"):
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(self.base + bad)
+            self.assertEqual(ctx.exception.code, 404)
+        self.full_flow("demo_sas_capture", False)
+        self.call("POST", "/api/job/demo_sas_capture/approve", {"artifact": "results", "decision": "approve", "reviewer": "Pat", "comment": "ok"})
+        status, data = self.call("GET", "/api/job/demo_sas_capture/report_data")
+        self.assertEqual(status, 200)
+        self.assertTrue(data["check"]["passed"])
+        self.assertEqual(data["results_review"]["reviewer"], "Pat")
+        self.assertIn("txn_summary.sas", data["sources"])
+        self.assertTrue(data["audit"])
+
+    # ------------------------------------------------------------ new pages and modules
+    def raw(self, path):
+        with urllib.request.urlopen(self.base + path) as r:
+            return r.read(), r.headers
+
+    def test_every_page_is_served(self):
+        for path in ("/", "/parity", "/understand", "/mapping-to-code", "/code-to-mapping", "/reconcile", "/report"):
+            body, headers = self.raw(path)
+            self.assertIn(b"<title>", body, path)
+            self.assertTrue(headers["Content-Type"].startswith("text/html"))
+
+    def test_scan_endpoint(self):
+        status, data = self.call("GET", "/api/job/demo_python_pass/scan")
+        self.assertEqual(status, 200)
+        self.assertIn("Python script", data["summary"])
+        self.assertEqual(self.call("POST", "/api/jobs", {"name": "noscript"})[0], 200)
+        self.assertEqual(self.call("GET", "/api/job/noscript/scan")[0], 400)
+
+    def test_mapping_to_code_flow(self):
+        import base64
+        job = "m2c"
+        self.call("POST", "/api/jobs", {"name": job})
+        sample = (ROOT / "samples" / "Source_Target_Mapping_Example.xlsx").read_bytes()
+        self.assertEqual(self.call("POST", "/api/job/%s/mapping_upload" % job, {"filename": "notes.csv", "b64": base64.b64encode(b"a,b").decode()})[0], 400)
+        self.assertEqual(self.call("POST", "/api/job/%s/mapping_upload" % job, {"filename": "x.xlsx", "b64": base64.b64encode(b"not a zip").decode()})[0], 400)
+        self.assertEqual(self.call("GET", "/api/job/%s/prompt?step=mapping_sql" % job)[0], 400)          # no mapping yet
+        status, state = self.call("POST", "/api/job/%s/mapping_upload" % job, {"filename": "Source_Target_Mapping_Example.xlsx", "b64": base64.b64encode(sample).decode()})
+        self.assertEqual(status, 200)
+        self.assertEqual(state["summary"]["columns"], 17)
+        self.assertEqual(state["reference_coverage"]["counts"]["missing"], 4)
+        status, body = self.call("GET", "/api/job/%s/prompt?step=mapping_sql&dialect=PostgreSQL" % job)
+        self.assertIn("PostgreSQL", body["prompt"])
+        self.assertIn("M06", body["prompt"])
+        self.assertIn("13. [Dedup]", body["prompt"])                         # rules are listed in order
+        reply = "Here:\n```sql\nINSERT INTO DWH.FACT_ACCOUNT_DAILY (ACCOUNT_ID) SELECT a.ACCT_ID AS ACCOUNT_ID FROM CBS.DAILY_BALANCE db JOIN CBS.ACCOUNT a ON db.ACCT_ID = a.ACCT_ID;\n```\n## Assumptions and open questions\n- none\n"
+        self.call("POST", "/api/job/%s/file" % job, {"kind": "answer", "filename": "mapping_sql", "content": reply})
+        status, state = self.call("POST", "/api/job/%s/save_generated" % job, {"target": "sql"})
+        self.assertEqual(status, 200)
+        gen = state["generated"]["sql"]
+        self.assertTrue(gen["code"].startswith("INSERT INTO"))
+        self.assertGreater(gen["coverage"]["counts"]["missing"], 0)      # one column of 17 is far from complete
+        self.assertFalse(gen["approved"])
+        self.assertEqual(self.call("POST", "/api/job/%s/approve" % job, {"artifact": "generated_sql", "decision": "approve", "reviewer": "Pat", "comment": ""})[0], 200)
+        self.assertTrue(self.call("GET", "/api/job/%s/mapping" % job)[1]["generated"]["sql"]["approved"])
+        body, headers = self.raw("/api/job/%s/download?what=sql" % job)
+        self.assertIn(b"INSERT INTO", body)
+        self.assertIn("attachment", headers["Content-Disposition"])
+
+    def test_mapping_versions_and_change_tracking(self):
+        import base64
+        import copy
+        import mapping
+        job = "versions"
+        self.call("POST", "/api/jobs", {"name": job})
+        v1_bytes = (ROOT / "samples" / "Source_Target_Mapping_Example.xlsx").read_bytes()
+        upload = lambda data, note="": self.call("POST", "/api/job/%s/mapping_upload" % job, {"filename": "map.xlsx", "b64": base64.b64encode(data).decode(), "note": note})
+        status, state = upload(v1_bytes, "first cut")
+        self.assertEqual((status, state["version"], state["upload_result"]["new"]), (200, 1, True))
+        self.assertIsNone(state["diff"])
+        # work done on v1: code is generated and approved
+        sql1 = "INSERT INTO T (A) SELECT x AS A FROM db WHERE d >= :run_date - 3 -- Rule 8\n"
+        self.call("POST", "/api/job/%s/file" % job, {"kind": "answer", "filename": "mapping_sql", "content": "```sql\n" + sql1 + "```"})
+        self.call("POST", "/api/job/%s/save_generated" % job, {"target": "sql"})
+        # the same file again: no new version
+        status, state = upload(v1_bytes)
+        self.assertFalse(state["upload_result"]["new"])
+        self.assertEqual(len(state["versions"]), 1)
+        # an edited mapping: window 3 -> 7 days, a column removed, a note added
+        model = mapping.load_xlsx(v1_bytes)
+        edited = copy.deepcopy(model)
+        edited["rules"][7]["expr"] = "db.BAL_DATE >= :run_date - 7 AND db.BAL_DATE <= :run_date"
+        edited["mappings"] = [m for m in edited["mappings"] if m["id"] != "M17"]
+        edited["mappings"][0]["notes"] = "now documented"
+        status, state = upload(mapping.write_xlsx(edited), "load window widened to 7 days")
+        self.assertEqual((state["version"], state["upload_result"]["new"]), (2, True))
+        self.assertEqual(len(state["versions"]), 2)
+        self.assertEqual(state["versions"][1]["note"], "load window widened to 7 days")
+        counts = state["diff"]["counts"]
+        self.assertEqual((counts["rules_changed"], counts["columns_removed"], counts["columns_changed"]), (1, 1, 1))
+        self.assertEqual(state["diff"]["rules"]["changed"][0]["affects"], ["BALANCE_DATE"])
+        # v1's code is kept with v1; v2 starts clean
+        self.assertEqual(state["generated"], {})
+        self.assertTrue(state["versions"][0]["code"]["sql"])
+        self.assertFalse(state["versions"][1]["code"]["sql"])
+        self.assertTrue(state["previous_code"]["sql"])
+        body, _ = self.raw("/api/job/%s/download?what=sql&version=1" % job)
+        self.assertIn(b":run_date - 3", body)
+        # the update prompt carries the previous code and the change list
+        prompt = self.call("GET", "/api/job/%s/prompt?step=mapping_sql&update=1" % job)[1]["prompt"]
+        for expected in ("UPDATE INSTRUCTIONS", "changed in v2", ":run_date - 3", "Rule 8", "REMOVED column BATCH_ID"):
+            self.assertIn(expected, prompt)
+        self.assertNotIn("UPDATE INSTRUCTIONS", self.call("GET", "/api/job/%s/prompt?step=mapping_sql" % job)[1]["prompt"])
+        # v2 code, then compare versions including the code diff
+        sql2 = sql1.replace("- 3", "- 7").replace("Rule 8", "Rule 8 (changed in v2)")
+        self.call("POST", "/api/job/%s/file" % job, {"kind": "answer", "filename": "mapping_sql", "content": "```sql\n" + sql2 + "```"})
+        self.call("POST", "/api/job/%s/save_generated" % job, {"target": "sql"})
+        status, cmp = self.call("GET", "/api/job/%s/mapping_compare?from=1&to=2" % job)
+        self.assertEqual(status, 200)
+        self.assertEqual((cmp["code"]["sql"]["diff"]["added"], cmp["code"]["sql"]["diff"]["removed"]), (1, 1))
+        touched = {x["item"]: x["status"] for x in cmp["code"]["sql"]["touched"]}
+        self.assertEqual(touched["Rule 8 Load window"], "touched")
+        self.assertEqual(touched["Removed column BATCH_ID"], "not_touched")      # the code never changed for the removed column
+        self.assertEqual(self.call("GET", "/api/job/%s/mapping_compare?from=1&to=9" % job)[0], 400)
+        # version history appears in the report data
+        self.assertEqual(len(self.call("GET", "/api/job/%s/report_data" % job)[1]["mapping"]["versions"]), 2)
+
+    def test_code_to_mapping_flow(self):
+        import mapping
+        job = "c2m"
+        self.call("POST", "/api/jobs", {"name": job})
+        self.call("POST", "/api/job/%s/file" % job, {"kind": "source", "filename": "load.sql", "content": "INSERT INTO t (id) SELECT id FROM s;"})
+        status, body = self.call("GET", "/api/job/%s/prompt?step=code_to_mapping" % job)
+        self.assertIn("load.sql", body["prompt"])
+        self.assertIn("Tables read", body["prompt"])                         # measured facts are included
+        self.assertEqual(self.call("POST", "/api/job/%s/parse_reply" % job, {})[0], 400)
+        reply = ("## Source_Target_Mapping\n| Map ID | Source Table | Source Column | Target Table | Target Column | Transformation / Business Logic |\n|---|---|---|---|---|---|\n"
+                 "| M01 | S | id | T | id | Direct move |\n## Joins_Filters\n| Seq | Type | Rule Name | Left Table (Alias) | Join Condition / Filter Expression |\n|---|---|---|---|---|\n| 1 | Driver | Base | S (s) | FROM S s |\n")
+        self.call("POST", "/api/job/%s/file" % job, {"kind": "answer", "filename": "code_to_mapping", "content": reply})
+        status, state = self.call("POST", "/api/job/%s/parse_reply" % job, {})
+        self.assertEqual(status, 200)
+        self.assertEqual(state["summary"]["columns"], 1)
+        self.assertEqual(state["coverage"]["counts"]["missing"], 0)          # id and s both appear in the code
+        data, headers = self.raw("/api/job/%s/download?what=mapping_xlsx" % job)
+        self.assertEqual(mapping.load_xlsx(data)["mappings"][0]["target_column"], "id")
+        self.assertIn(b"Map ID", self.raw("/api/job/%s/download?what=mapping_csv" % job)[0])
+        self.assertEqual(self.call("POST", "/api/job/%s/approve" % job, {"artifact": "derived_mapping", "decision": "approve", "reviewer": "Pat", "comment": ""})[0], 200)
+        self.assertTrue(self.call("GET", "/api/job/%s/derived" % job)[1]["approved"])
+
+    def test_code_to_mapping_versions(self):
+        import mapping
+        job = "c2mv"
+        self.call("POST", "/api/jobs", {"name": job})
+        reply = lambda window, extra="": (
+            "## Source_Target_Mapping\n| Map ID | Source Table | Source Column | Target Table | Target Column | Transformation / Business Logic |\n|---|---|---|---|---|---|\n"
+            "| M01 | S | id | T | id | Direct move |\n" + extra + "## Joins_Filters\n| Seq | Type | Rule Name | Left Table (Alias) | Join Condition / Filter Expression |\n|---|---|---|---|---|\n"
+            "| 1 | Driver | Base | S (s) | FROM S s |\n| 2 | Filter | Window | s | s.d >= :run_date - %d |\n" % window)
+        script1 = "INSERT INTO t (id) SELECT id FROM s WHERE d >= :run_date - 3;"
+        self.call("POST", "/api/job/%s/file" % job, {"kind": "source", "filename": "load.sql", "content": script1})
+        save = lambda text: self.call("POST", "/api/job/%s/file" % job, {"kind": "answer", "filename": "code_to_mapping", "content": text})
+        parse = lambda note="": self.call("POST", "/api/job/%s/parse_reply" % job, {"note": note})
+        save(reply(3))
+        status, state = parse("first cut")
+        self.assertEqual((status, state["version"], state["upload_result"]["new"]), (200, 1, True))
+        # same reply, same script: nothing new
+        status, state = parse()
+        self.assertFalse(state["upload_result"]["new"])
+        self.assertEqual(len(state["versions"]), 1)
+        # the code changes (3 -> 7 days) and Copilot returns an updated mapping with one more column
+        self.call("POST", "/api/job/%s/file" % job, {"kind": "source", "filename": "load.sql", "content": script1.replace("- 3", "- 7") + "\n-- widened"})
+        save(reply(7, "| M02 | S | name | T | name | Direct move |\n"))
+        status, state = parse("window widened")
+        self.assertEqual((state["version"], state["upload_result"]["new"]), (2, True))
+        self.assertIn("Code changed in 1 file", state["upload_result"]["message"])
+        self.assertEqual(state["diff"]["counts"]["columns_added"], 1)
+        self.assertEqual(state["diff"]["counts"]["rules_changed"], 1)
+        self.assertEqual(state["versions"][1]["note"], "window widened")
+        self.assertIn("Code changed", state["versions"][1]["summary"])
+        status, cmp = self.call("GET", "/api/job/%s/derived_compare?from=1&to=2" % job)
+        self.assertEqual(status, 200)
+        self.assertEqual(cmp["scripts"]["load.sql"]["status"], "changed")
+        self.assertTrue(any("- 7" in l["text"] for l in cmp["scripts"]["load.sql"]["diff"]["lines"] if l["kind"] == "add"))
+        # an older version can still be downloaded as Excel
+        data, _ = self.raw("/api/job/%s/download?what=mapping_xlsx&version=1" % job)
+        self.assertEqual(len(mapping.load_xlsx(data)["mappings"]), 1)
+        data, _ = self.raw("/api/job/%s/download?what=mapping_xlsx" % job)
+        self.assertEqual(len(mapping.load_xlsx(data)["mappings"]), 2)
+        self.assertEqual(self.call("GET", "/api/job/%s/derived_compare?from=1&to=5" % job)[0], 400)
+        # approval belongs to one version: approving v2, then changing the mapping, leaves the newest unapproved
+        self.call("POST", "/api/job/%s/approve" % job, {"artifact": "derived_mapping", "decision": "approve", "reviewer": "Pat", "comment": ""})
+        self.assertTrue(self.call("GET", "/api/job/%s/derived" % job)[1]["versions"][1]["approved"])
+        self.assertFalse(self.call("GET", "/api/job/%s/derived" % job)[1]["versions"][0]["approved"])
+
+    def test_report_includes_new_sections(self):
+        data = self.call("GET", "/api/job/c2m/report_data")[1] if self.call("GET", "/api/job/c2m")[0] == 200 else {}
+        if data:
+            self.assertIsNotNone(data["scan"])
+
+    def test_reconcile_endpoint(self):
+        status, r = self.call("POST", "/api/reconcile", {"expected": "id,v\n1,a\n2,b\n", "actual": "id,v\n2,b\n1,a\n", "keys": "id", "tolerance": "0"})
+        self.assertTrue(r["passed"])
+        status, r = self.call("POST", "/api/reconcile", {"expected": "id,v\n1,a\n", "actual": "id,v\n1,z\n"})
+        self.assertFalse(r["passed"])
+        self.assertEqual(r["diffs"][0]["expected"], "a")
+        self.assertEqual(self.call("POST", "/api/reconcile", {"expected": "", "actual": "x"})[0], 400)
 
     def test_rejects_bad_names_and_cross_site(self):
         self.assertEqual(self.call("POST", "/api/jobs", {"name": "../evil"})[0], 400)

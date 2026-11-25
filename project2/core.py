@@ -1,6 +1,6 @@
 """All the logic (no web code here). Standard library only, Python 3.9+.
 
-Parts:  settings  |  jobs  |  prompts  |  run scripts  |  compare  |  audit log  |  report
+Parts:  settings  |  jobs  |  prompts  |  run scripts  |  compare  |  audit trail  |  evidence report
 """
 import csv
 import hashlib
@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 FILE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
-STEPS = ("analyze", "gen_input", "gen_expected", "convert", "cloud")
+STEPS = ("analyze", "gen_input", "gen_expected", "convert", "cloud", "explain", "mapping_sql", "mapping_pyspark", "code_to_mapping")
 UNVERIFIED = "Copilot-predicted (UNVERIFIED)"
 MAX_PREDICT_LINES = 200
 AUDIT_COLUMNS = ["time", "reviewer", "job", "action", "artifact", "sha256", "decision", "comment"]
@@ -55,27 +55,28 @@ class Settings:
         self.jobs_dir = ROOT / get("JOBS_DIR", "jobs")
         self.target = get("MODERN_TARGET", "python")
         self.copilot_cmd = get("COPILOT_CMD", "")
+        self.dialect = get("SQL_DIALECT", "Snowflake SQL")
         self.audit_file = ROOT / "audit" / "audit_log.csv"
 
 
 # ---------------------------------------------------------------- jobs
 def check_name(name):
     if not NAME_RE.match(name or ""):
-        raise UserError("Job name: use letters, numbers, - and _ only (max 40).")
+        raise UserError("Migration name: use letters, numbers, - and _ only (max 40).")
     return name
 
 
 def job_dir(cfg, name):
     path = cfg.jobs_dir / check_name(name)
     if not path.is_dir():
-        raise UserError("Job '%s' does not exist." % name)
+        raise UserError("Migration '%s' does not exist." % name)
     return path
 
 
 def create_job(cfg, name):
     path = cfg.jobs_dir / check_name(name)
     if path.exists():
-        raise UserError("Job '%s' already exists." % name)
+        raise UserError("Migration '%s' already exists." % name)
     for sub in ("legacy", "answers", "output"):
         (path / sub).mkdir(parents=True)
     save_meta(path, {"key_columns": cfg.key_columns, "tolerance": cfg.tolerance,
@@ -159,11 +160,12 @@ def job_state(cfg, name):
         "answers": {step: read_text(path / "answers" / (step + ".md")) for step in STEPS},
         "has_modern_output": (path / "output" / "modern.csv").exists(),
         "last_check": json.loads(read_text(path / "output" / "last_check.json", "null")),
+        "results_review": results_review(cfg, name),
     }
 
 
 # ---------------------------------------------------------------- prompts
-def build_prompt(cfg, name, step):
+def build_prompt(cfg, name, step, options=None):
     if step not in STEPS:
         raise UserError("Unknown step.")
     path = job_dir(cfg, name)
@@ -184,6 +186,9 @@ def build_prompt(cfg, name, step):
               "{expected_head}": head_lines(path / "expected.csv"),
               "{python_job}": read_text(path / "new_job.py", "(not written yet)"),
               "{target}": cfg.target}
+    if step in ("explain", "mapping_sql", "mapping_pyspark", "code_to_mapping"):
+        import workflows                       # imported here because workflows itself imports core
+        values = workflows.prompt_values(cfg, name, step, options or {})
     for key, value in values.items():
         template = template.replace(key, value)
     log_event(cfg, cfg.reviewer, name, "prompt_built", step, hashlib.sha256(template.encode()).hexdigest(), "", "")
@@ -248,9 +253,9 @@ def run_legacy(cfg, name):
 def run_modern(cfg, name):
     path = job_dir(cfg, name)
     if not (path / "new_job.py").exists():
-        raise UserError("Add the new Python code first (step 4).")
+        raise UserError("Add the new code first (step 4).")
     if not code_is_approved(cfg, name):
-        raise UserError("Approve the new code first (step 4). Editing the code removes the approval.")
+        raise UserError("Sign off the new code first (step 4). Editing the code removes the sign-off.")
     if not (path / "input.csv").exists():
         raise UserError("Add input data first (step 2).")
     meta = load_meta(path)
@@ -396,6 +401,29 @@ def run_check(cfg, name):
     return result
 
 
+def reconcile(cfg, expected_text, actual_text, keys="", tolerance="0"):
+    """Compare two CSV texts that are not tied to a job (for example source vs target after a migration)."""
+    import tempfile
+    if not expected_text.strip() or not actual_text.strip():
+        raise UserError("Add both files (or paste both).")
+    key_list = [k.strip() for k in (keys or "").split(",") if k.strip()]
+    with tempfile.TemporaryDirectory() as tmp:
+        e, a = Path(tmp) / "a.csv", Path(tmp) / "b.csv"
+        e.write_text(expected_text, encoding="utf-8", newline="")
+        a.write_text(actual_text, encoding="utf-8", newline="")
+        try:
+            result = compare_csv(e, a, key_list, tolerance or "0", cfg.max_mismatches)
+        except (ValueError, csv.Error, InvalidOperation) as error:
+            raise UserError("Could not compare the files: %s" % error)
+        header, e_rows = preview_rows(e)
+        result["preview"] = {"header": header, "expected": e_rows, "actual": preview_rows(a)[1]}
+    result.update(checked_at=datetime.now().isoformat(timespec="seconds"), data_label="uploaded files", unverified=False, key_columns=key_list,
+                  tolerance=tolerance or "0", input_origin="", expected_origin="", input_sha="", expected_sha=hashlib.sha256(expected_text.encode()).hexdigest(),
+                  modern_sha=hashlib.sha256(actual_text.encode()).hexdigest())
+    log_event(cfg, cfg.reviewer, "(reconcile)", "reconcile", "2 files", result["modern_sha"], "PASS" if result["passed"] else "FAIL", "%d differences" % result["diff_count"])
+    return result
+
+
 # ---------------------------------------------------------------- audit log
 def log_event(cfg, reviewer, job, action, artifact, sha, decision, comment):
     cfg.audit_file.parent.mkdir(parents=True, exist_ok=True)
@@ -424,15 +452,21 @@ def approve(cfg, name, artifact, decision, reviewer, comment):
         raise UserError("Enter your name.")
     if artifact == "new_job":
         if not (path / "new_job.py").exists():
-            raise UserError("Add the new Python code first (step 4).")
+            raise UserError("Add the new code first (step 4).")
         sha = sha256_of(path / "new_job.py")
     elif artifact == "results":
         check = path / "output" / "last_check.json"
         if not check.exists():
-            raise UserError("Run the parity check before approving results.")
+            raise UserError("Run the comparison before signing off the results.")
         sha = json.loads(check.read_text(encoding="utf-8"))["modern_sha"]
     else:
-        raise UserError("Unknown artifact.")
+        import workflows
+        target = workflows.artifact_file(cfg, name, artifact)
+        if not target:
+            raise UserError("Unknown artifact.")
+        if not target.exists():
+            raise UserError("There is nothing to sign off yet.")
+        sha = sha256_of(target)
     log_event(cfg, reviewer.strip(), name, "review", artifact, sha, decision, comment)
 
 
@@ -449,12 +483,46 @@ def code_is_approved(cfg, name):
 
 
 # ---------------------------------------------------------------- report
+def results_review(cfg, name):
+    """Latest human decision on the current results, or None."""
+    check = json.loads(read_text(cfg.jobs_dir / name / "output" / "last_check.json", "null"))
+    if not check:
+        return None
+    latest = None
+    for row in read_audit(cfg, name):
+        if row["action"] == "review" and row["artifact"] == "results" and row["sha256"] == check["modern_sha"]:
+            latest = {"reviewer": row["reviewer"], "time": row["time"], "decision": row["decision"], "comment": row["comment"]}
+    return latest
+
+
+def extra_report_parts(cfg, name, state):
+    """Understanding, mapping and generated-code sections, when the job has them."""
+    import scan
+    import workflows
+    texts = workflows.source_texts(cfg, name)
+    mapped = workflows.mapping_state(cfg, name)
+    derived = workflows.derived_state(cfg, name)
+    return {"scan": scan.scan_sources(texts) if texts else None, "mapping": mapped if mapped.get("model") else None,
+            "derived": derived if derived.get("model") else None}
+
+
+def report_data(cfg, name):
+    """Everything the report page shows, as one JSON-friendly dict."""
+    state = job_state(cfg, name)
+    path = job_dir(cfg, name)
+    return {"job": name, "generated": datetime.now().isoformat(timespec="seconds"), "meta": state["meta"],
+            "check": state["last_check"], "answers": state["answers"], "new_job": state["new_job"],
+            "code_approved": state["code_approved"], "results_review": state["results_review"],
+            "sources": {n: read_text(path / "legacy" / n) for n in state["sources"]}, "audit": read_audit(cfg, name),
+            **extra_report_parts(cfg, name, state)}
+
+
 def build_report(cfg, name):
     state = job_state(cfg, name)
     check = state["last_check"]
-    out = ["# Parity report: %s" % name, "", "Generated %s" % datetime.now().isoformat(timespec="seconds"), ""]
+    out = ["# Evidence report: %s" % name, "", "Generated %s" % datetime.now().isoformat(timespec="seconds"), ""]
     if not check:
-        out += ["**No parity check has been run yet.**", ""]
+        out += ["**No comparison has been run yet.**", ""]
     else:
         verdict = "PASS" if check["passed"] else "FAIL"
         out += ["## Result: %s (on %s)" % (verdict, check["data_label"]), "",
@@ -475,6 +543,33 @@ def build_report(cfg, name):
     for step, title in (("analyze", "Business rules and technical debt (Copilot, reviewed by a human)"), ("cloud", "Cloud target skeleton (Copilot, not run)")):
         if state["answers"][step].strip():
             out += ["## " + title, "", state["answers"][step].strip(), ""]
+    extra = extra_report_parts(cfg, name, state)
+    if extra["scan"]:
+        t = extra["scan"]["total"]
+        out += ["## Script analysis (measured, no AI)", "", extra["scan"]["summary"], "",
+                "- Lines %d, tables read %d, joins %d, CASE rules %d, complexity %s" % (t["lines"], len(t["tables_read"]), t["joins"], t["rules"], t["complexity"]),
+                "- Things to watch: %d high, %d medium, %d low" % (t["high"], t["medium"], t["low"]), ""]
+    if state["answers"]["explain"].strip():
+        out += ["## Plain-English explanation (Copilot, reviewed by a person)", "", state["answers"]["explain"].strip(), ""]
+    if extra["mapping"]:
+        m = extra["mapping"]
+        out += ["## Mapping document: %s" % m["model"].get("filename", ""), "", "- %d target columns, %d rules, %d source tables" % (m["summary"]["columns"], m["summary"]["rules"], len(m["summary"]["source_tables"]))]
+        if len(m.get("versions", [])) > 1:
+            out.append("- Mapping versions: %d (latest v%d)" % (len(m["versions"]), m["version"]))
+            for v in m["versions"][1:]:
+                out.append("  - v%d (%s, %s): %s%s" % (v["n"], v["uploaded"].replace("T", " "), v["by"] or "unknown", v["summary"], (" Note: " + v["note"]) if v["note"] else ""))
+        for target, g in m["generated"].items():
+            c = g["coverage"]["counts"]
+            out.append("- Generated %s (%s): %d found, %d to verify, %d missing of %d checks" % (target, "approved" if g["approved"] else "not approved", c["found"], c["verify"], c["missing"], g["coverage"]["total"]))
+        out.append("")
+    if extra["derived"]:
+        d = extra["derived"]
+        out += ["## Mapping built from code (%s)" % ("approved" if d["approved"] else "not approved"), "", "- %d target columns, %d rules" % (d["summary"]["columns"], d["summary"]["rules"])]
+        if len(d.get("versions", [])) > 1:
+            out.append("- Versions: %d (latest v%d)" % (len(d["versions"]), d["version"]))
+            for v in d["versions"][1:]:
+                out.append("  - v%d (%s, %s): %s%s" % (v["n"], v["uploaded"].replace("T", " "), v["by"] or "unknown", v["summary"], (" Note: " + v["note"]) if v["note"] else ""))
+        out.append("")
     out += ["## Audit trail", "", "| Time | Reviewer | Action | Artifact | Decision | SHA-256 | Comment |", "|---|---|---|---|---|---|---|"]
     for r in read_audit(cfg, name):
         out.append("| %s | %s | %s | %s | %s | %s | %s |" % (r["time"], r["reviewer"], r["action"], r["artifact"], r["decision"], r["sha256"][:12], r["comment"].replace("|", "/")))

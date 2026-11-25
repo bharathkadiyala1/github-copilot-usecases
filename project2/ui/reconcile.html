@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reconcile &middot; BMO ParityPilot</title><link rel="stylesheet" href="/ui/style.css">
+<style>.two{display:grid;grid-template-columns:1fr 1fr;gap:14px;overflow-x:auto}.diffcell{background:#fdecea}</style></head><body>
+<div class="top"><img id="logo" alt="logo"><div class="brand"><b>BMO ParityPilot</b><small>AI-ASSISTED MODERNIZATION, WITH PROOF</small></div></div>
+<div class="page">
+  <h1 class="page-title">Reconcile</h1>
+  <p class="lead">Compare any two CSV files, such as source vs target after a migration. Nothing is saved except a line in the audit trail.</p>
+  <div class="card"><div class="cols2">
+    <div><b>File A (for example source or legacy)</b><div class="row"><input type="file" id="fa" accept=".csv,.txt"></div><textarea id="ta" placeholder="or paste CSV here (first line = column names)"></textarea></div>
+    <div><b>File B (for example target or new)</b><div class="row"><input type="file" id="fb" accept=".csv,.txt"></div><textarea id="tb" placeholder="or paste CSV here (first line = column names)"></textarea></div></div>
+    <div class="row"><label>Match rows by column(s):</label><input type="text" id="keys" style="width:240px" placeholder="e.g. account_id (blank = by row order)"><label>Allowed difference for numbers:</label><input type="text" id="tol" value="0" style="width:80px"><button id="go">Compare</button></div></div>
+  <div class="card"><div id="result" class="verdict none">Not compared yet</div><div id="detail"></div></div>
+</div>
+<footer class="foot">Mock data only &middot; every action is recorded in the audit trail</footer>
+<div id="msg"></div>
+<script src="/ui/md.js"></script><script src="/ui/nav.js"></script><script src="/ui/common.js"></script>
+<script>
+mainNav('/reconcile'); loadLogo();
+for(const [f,t] of [['fa','ta'],['fb','tb']]) $(f).onchange=async()=>{ const x=$(f).files[0]; if(x){ $(t).value=await x.text() } };
+$('go').onclick=()=>work('Comparing...',async()=>{
+  const r=await call('POST','/api/reconcile',{expected:$('ta').value,actual:$('tb').value,keys:$('keys').value,tolerance:$('tol').value||'0'});
+  const v=resultView(r,'Files'); $('result').className='verdict '+v.cls; $('result').innerHTML=v.verdict; $('detail').innerHTML=v.details });
+</script></body></html>

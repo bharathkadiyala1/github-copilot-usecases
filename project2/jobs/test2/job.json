@@ -1,0 +1,8 @@
+{
+  "key_columns": "",
+  "tolerance": "0",
+  "legacy_cmd": "",
+  "modern_cmd": "{python} new_job.py {input} {output}",
+  "input_origin": "provided",
+  "expected_origin": "provided"
+}

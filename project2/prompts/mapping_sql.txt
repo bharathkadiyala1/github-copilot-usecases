@@ -1,0 +1,16 @@
+Write {dialect} code that implements the source-to-target mapping below. All data is mock data.
+
+Requirements:
+- ONE statement that loads the target table: INSERT INTO <target> (<explicit column list>) SELECT ... with an alias on every selected column that equals the target column name.
+- Implement EVERY mapping rule and EVERY join/filter rule, in the order given. Do not skip, merge or reinterpret any rule.
+- Put a comment on each selected column with its Map ID (for example -- M06) and on each join, filter and dedup with its rule number (for example -- Rule 4).
+- Use the aliases given in the rules (db, a, b, fx, t, c, p ...). Keep run-time parameters as bind variables with the same names (for example :run_date).
+- Where the rules fully describe a subquery or window function, write it out; do not leave placeholders.
+- Do not invent tables, columns or business rules. If something is missing or contradictory, keep the code as close to the rules as possible and list it under open questions.
+
+Reply in this exact shape:
+1. One fenced code block (```sql) with the full statement.
+2. A section "## Assumptions and open questions" as bullets.
+3. A section "## Rule traceability" as a table with columns: Rule or Map ID | Where in the code.
+
+{update_block}{mapping}

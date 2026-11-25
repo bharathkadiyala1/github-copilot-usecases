@@ -6,8 +6,9 @@
   "diffs": [],
   "columns_diverged": {},
   "header_ok": true,
-  "checked_at": "2026-11-25T14:01:02",
+  "checked_at": "2026-11-25T17:13:53",
   "data_label": "provided data",
+  "unverified": false,
   "input_origin": "provided",
   "expected_origin": "legacy script run here",
   "input_sha": "5cd211174da698f60aac7fa189f1e8175d5c7baab277877feced61d85a6944a2",
@@ -16,5 +17,96 @@
   "key_columns": [
     "account_id"
   ],
-  "tolerance": "0"
+  "tolerance": "0",
+  "preview": {
+    "header": [
+      "account_id",
+      "txn_count",
+      "total_cad"
+    ],
+    "expected": [
+      [
+        "ACC001",
+        "6",
+        "2141.12"
+      ],
+      [
+        "ACC002",
+        "8",
+        "2996.50"
+      ],
+      [
+        "ACC003",
+        "6",
+        "2155.10"
+      ],
+      [
+        "ACC004",
+        "5",
+        "894.26"
+      ],
+      [
+        "ACC005",
+        "1",
+        "0.70"
+      ],
+      [
+        "ACC006",
+        "3",
+        "2025.19"
+      ],
+      [
+        "ACC007",
+        "5",
+        "866.16"
+      ],
+      [
+        "ACC008",
+        "4",
+        "527.40"
+      ]
+    ],
+    "actual": [
+      [
+        "ACC001",
+        "6",
+        "2141.12"
+      ],
+      [
+        "ACC002",
+        "8",
+        "2996.50"
+      ],
+      [
+        "ACC003",
+        "6",
+        "2155.10"
+      ],
+      [
+        "ACC004",
+        "5",
+        "894.26"
+      ],
+      [
+        "ACC005",
+        "1",
+        "0.70"
+      ],
+      [
+        "ACC006",
+        "3",
+        "2025.19"
+      ],
+      [
+        "ACC007",
+        "5",
+        "866.16"
+      ],
+      [
+        "ACC008",
+        "4",
+        "527.40"
+      ]
+    ]
+  }
 }
