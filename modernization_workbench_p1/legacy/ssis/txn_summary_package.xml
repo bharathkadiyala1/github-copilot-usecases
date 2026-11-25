@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<!-- txn_summary_package.xml - simplified view of an SSIS package (TxnSummary.dtsx).
+     REFERENCE ONLY: shown to Copilot for analysis. It is not run here. -->
+<Package Name="TxnSummary">
+  <Connections>
+    <FlatFileConnection Name="TxnCsv" Path="\\fileshare\in\transactions.csv" HeaderRow="true" />
+    <FlatFileConnection Name="SummaryCsv" Path="\\fileshare\out\summary.csv" />
+  </Connections>
+  <DataFlow Name="Build summary">
+    <Source Type="FlatFileSource" Connection="TxnCsv" />
+    <Transform Type="ConditionalSplit" Name="Validate">
+      <Output Name="Rejects">
+        LEN(TRIM(txn_id)) == 0 || LEN(TRIM(account_id)) == 0 || ISNULL(txn_date_parsed)
+        || amount_text NOT NUMERIC || currency NOT IN ("CAD","USD")
+      </Output>
+    </Transform>
+    <Transform Type="ScriptComponent" Name="PriceAndFee" Language="C#">
+      <![CDATA[
+        // Math.Round on a decimal uses banker's rounding (round half to even) by default.
+        decimal cad = row.Currency == "USD" ? Math.Round(row.Amount * 1.35m, 2) : row.Amount;
+        decimal fee = 0m;
+        if (row.TxnType == "WDR" && row.Channel == "ATM" && cad > 500m) fee = 2.00m;
+        if (row.TxnType == "WIRE") fee = Math.Max(5m, Math.Min(25m, Math.Round(cad * 0.001m, 2)));
+      ]]>
+    </Transform>
+    <Transform Type="Sort" Name="RemoveDuplicates" Key="txn_id" EliminateDuplicates="true" />
+    <Transform Type="Aggregate" Name="ByAccount" GroupBy="account_id">
+      <Sum Column="cad_credit" /><Sum Column="cad_debit" /><Sum Column="fee" />
+      <Max Column="txn_date" /><Count Name="txn_count" />
+    </Transform>
+    <Destination Type="FlatFileDestination" Connection="SummaryCsv" />
+  </DataFlow>
+</Package>

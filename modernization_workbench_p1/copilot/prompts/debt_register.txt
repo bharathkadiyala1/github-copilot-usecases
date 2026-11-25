@@ -1,0 +1,10 @@
+You are reviewing a legacy ETL job (system: {system}) for technical debt.
+
+TASK: Produce a table of technical debt with these columns:
+item | category | risk (High/Medium/Low) | why it matters | suggested fix
+Use these categories: hardcoded configuration, missing tests, outdated technology,
+tight coupling, no logging or monitoring, security gap, performance or scalability limit.
+Only report what you can see in the code. Keep the table to the 10 most important items.
+
+LEGACY SOURCE:
+{source}

@@ -1,0 +1,14 @@
+Convert the legacy ETL job below (system: {system}) into a PySpark DataFrame job that writes {target}.
+
+Requirements:
+- Behaviour must be identical to the legacy job, including the rounding style used by {system}.
+- Read every setting (paths, FX rate, fees, rounding style) from a config dictionary, not hardcoded values.
+- Keep money as whole cents. Reject bad rows to a separate rejects table with the reason code.
+- Add short comments, and list any assumption you had to make at the end.
+- Do not use any network access or secrets. Mock data only.
+
+BUSINESS RULES:
+{rules}
+
+LEGACY SOURCE:
+{source}

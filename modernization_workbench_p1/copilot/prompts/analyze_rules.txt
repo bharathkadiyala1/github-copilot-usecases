@@ -1,0 +1,12 @@
+You are helping modernize a legacy ETL job (system: {system}).
+
+TASK: Read the legacy source below and list every business rule it applies:
+validation, conversions, rounding, fees, date handling, de-duplication and output format.
+For each rule give: a rule id, a plain-English description, where in the code it comes from,
+and any edge case or hidden quirk (for example rounding that differs from other systems).
+Do not invent rules that are not in the code. Say "unclear" when the code does not show it.
+
+Use only mock data. Do not include secrets or real client data in your answer.
+
+LEGACY SOURCE:
+{source}

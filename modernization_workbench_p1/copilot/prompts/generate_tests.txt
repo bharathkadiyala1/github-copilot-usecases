@@ -1,0 +1,14 @@
+Write Python unittest test cases (standard library only, no pytest) for the rules below.
+The code under test is in modern/transform.py. Useful functions: parse_amount_cents, parse_date,
+to_cad_cents, fee_cents, validate, process. Config comes from modern.config.Config.
+
+Cover every rejection reason, the USD conversion rounding for each rounding style
+(ROUND_HALF_UP, ROUND_HALF_EVEN, ROUND_DOWN), the ATM fee threshold (500.00 vs 500.01),
+wire fee minimum and maximum, leap day, and duplicate handling.
+Use mock values only. Keep each test short and give it a clear name.
+
+BUSINESS RULES:
+{rules}
+
+LEGACY SOURCE ({system}) FOR REFERENCE:
+{source}
