@@ -1,0 +1,20 @@
+Write a modern replacement for a legacy data job as ONE Python 3.9+ script using only the standard library.
+
+Rules:
+- Usage: python new_job.py <input_csv_path> <output_csv_path>
+- Reproduce the legacy behaviour EXACTLY, including quirks (rounding style, ordering, rejects). Do not "fix" anything.
+- Output must have the same header and column order as the expected output sample below.
+- Use Decimal (not float) for money. Add comments that name the business rule each block implements.
+- Reply with ONLY the code.
+
+BUSINESS RULES (from analysis, may be empty):
+{rules}
+
+SAMPLE INPUT (first lines):
+{input_head}
+
+EXPECTED OUTPUT SAMPLE (first lines, from the legacy system):
+{expected_head}
+
+LEGACY SOURCE:
+{source}

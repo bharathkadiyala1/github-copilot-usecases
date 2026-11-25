@@ -1,0 +1,10 @@
+You are helping modernize a legacy data job. All data is mock data. Do not guess: if something is unclear, write UNKNOWN.
+
+Read the legacy source below and produce:
+1. BUSINESS RULES - a numbered list in plain language (validation, calculations, rounding, ordering, rejects).
+2. INPUTS AND OUTPUTS - every input and output with its columns, types and format.
+3. TECHNICAL DEBT REGISTER - a table with columns: Issue | Where (file/line) | Risk | Suggested fix.
+4. EDGE CASES TO TEST - rows that would expose differences (blanks, duplicates, rounding ties, bad dates, boundaries).
+
+LEGACY SOURCE:
+{source}

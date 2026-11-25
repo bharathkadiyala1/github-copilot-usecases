@@ -1,0 +1,8 @@
+You are helping test a legacy data job. All data is mock data. Never use real customer data.
+
+From the legacy source below, work out the input columns and write a CSV of 40 to 60 mock input rows.
+Include normal rows AND the edge cases the code treats specially (blanks, duplicates, bad values, boundaries, rounding ties, different currencies or codes).
+Reply with ONLY the CSV text: first line is the header, no explanations, no code fences.
+
+LEGACY SOURCE:
+{source}

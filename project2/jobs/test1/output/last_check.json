@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "expected_rows": 38,
+  "actual_rows": 38,
+  "diff_count": 0,
+  "diffs": [],
+  "columns_diverged": {},
+  "header_ok": true,
+  "checked_at": "2026-11-25T15:12:57",
+  "data_label": "UNVERIFIED Copilot-predicted output",
+  "unverified": true,
+  "input_origin": "generated",
+  "expected_origin": "Copilot-predicted (UNVERIFIED)",
+  "input_sha": "56b68cafb6c03a9ed23e6247101b1c388ae91f1170100596894cc10d354c8760",
+  "expected_sha": "31675be68152e841b7088dfba7665b390bf4025af803f9f74259600721297e1b",
+  "modern_sha": "31675be68152e841b7088dfba7665b390bf4025af803f9f74259600721297e1b",
+  "key_columns": [],
+  "tolerance": "0"
+}

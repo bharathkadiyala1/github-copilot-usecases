@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Parity Workbench</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1d2430;--mute:#667085;--line:#e2e5ea;--blue:#0b5cad;--green:#13795b;--red:#b42318;--amber:#a15c07}
+*{box-sizing:border-box}body{margin:0;font:15px/1.45 system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:#0b2545;color:#fff;padding:12px 24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header h1{font-size:18px;margin:0 12px 0 0;font-weight:600}header select,header input{padding:7px 9px;border-radius:6px;border:0;font-size:14px}
+main{max-width:900px;margin:0 auto;padding:12px 16px 60px}
+#next{background:#e8f1fb;border:1px solid #b9d4f1;border-radius:10px;padding:12px 16px;margin:14px 0;font-size:16px}
+#next b{color:var(--blue)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0}
+.card.now{border:2px solid var(--blue)}
+.card h2{margin:0 0 8px;font-size:16px;display:flex;align-items:center;gap:8px}
+.dot{width:22px;height:22px;border-radius:50%;background:#cfd6df;color:#fff;text-align:center;font-size:13px;line-height:22px;flex:none}
+.done .dot{background:var(--green)}.now .dot{background:var(--blue)}
+.st{margin-left:auto;font-size:12px;font-weight:400;color:var(--mute)}.done .st{color:var(--green)}
+textarea,input[type=text]{width:100%;font:12px/1.4 ui-monospace,Consolas,monospace;border:1px solid var(--line);border-radius:6px;padding:8px}
+textarea{min-height:110px;margin:6px 0}
+button{background:var(--blue);color:#fff;border:0;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:14px}
+button.alt{background:#fff;color:var(--blue);border:1px solid var(--blue)}button.red{background:var(--red)}button:disabled{opacity:.4;cursor:not-allowed}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+details{margin:8px 0}summary{cursor:pointer;color:var(--blue)}
+.hint{color:var(--mute);font-size:13px;margin:4px 0}
+.banner{padding:14px;border-radius:8px;font-size:18px;font-weight:600;margin:10px 0}.banner.pass{background:#e3f4ec;color:var(--green)}.banner.fail{background:#fdecea;color:var(--red)}.banner.none{background:#eef1f5;color:var(--mute)}
+table{border-collapse:collapse;width:100%;font-size:12px}th,td{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top;word-break:break-word}th{color:var(--mute)}
+#msg{position:fixed;left:50%;top:14px;transform:translateX(-50%);max-width:640px;padding:12px 18px;border-radius:8px;color:#fff;display:none;white-space:pre-wrap;z-index:9;font-size:14px;box-shadow:0 4px 14px #0004}
+body.busy button{opacity:.45;pointer-events:none}body.busy{cursor:progress}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid #fff6;border-top-color:#fff;border-radius:50%;animation:sp .8s linear infinite;margin-right:8px;vertical-align:-2px}@keyframes sp{to{transform:rotate(360deg)}}
+#msg.err{background:var(--red)}#msg.wait{background:#344054}#msg.good{background:var(--green)}.warn{color:var(--amber)}
+</style></head><body>
+<header><h1>Parity Workbench</h1>
+  <select id="job" title="Choose a job"></select>
+  <input id="newName" placeholder="new job name" size="14"><button class="alt" style="background:#fff" onclick="newJob()">+ New job</button>
+</header>
+
+<main id="main" hidden>
+<div id="next"></div>
+
+<div class="card" id="c1"><h2><span class="dot">1</span>Legacy script <span class="st" id="s1"></span></h2>
+  <div class="row"><input type="file" id="f_source" multiple onchange="upload('source')"></div>
+  <details><summary>or paste it</summary>
+    <input type="text" id="pName" placeholder="File name, e.g. my_script.sql"><textarea id="pSrc" placeholder="Paste the script here"></textarea>
+    <button class="alt" onclick="pasteSource()">Save script</button></details>
+  <div id="cp_analyze"></div>
+</div>
+
+<div class="card" id="c2"><h2><span class="dot">2</span>Input data (CSV) <span class="st" id="s2"></span></h2>
+  <div class="row"><input type="file" id="f_input" onchange="upload('input')"></div>
+  <details><summary>or paste it</summary><textarea id="pIn" placeholder="Paste CSV here. First line = column names."></textarea>
+    <button class="alt" onclick="pasteCsv('input','pIn')">Save input data</button></details>
+  <div class="hint">No input data? Let Copilot make sample data from your script:</div>
+  <div id="cp_gen_input"></div>
+</div>
+
+<div class="card" id="c3"><h2><span class="dot">3</span>Legacy output (CSV) <span class="st" id="s3"></span></h2>
+  <div class="hint">What the old system produced for that input. This is what the new job is checked against.</div>
+  <div class="row"><input type="file" id="f_expected" onchange="upload('expected')"></div>
+  <details><summary>or paste it</summary><textarea id="pEx" placeholder="Paste CSV here. First line = column names."></textarea>
+    <button class="alt" onclick="pasteCsv('expected','pEx')">Save legacy output</button></details>
+  <div class="hint">No legacy output at all? Copilot can predict it, but that is a guess, not proof:</div>
+  <div id="cp_gen_expected"></div>
+  <details><summary>or run the legacy script here (Python / shell only)</summary>
+    <div class="hint">Command uses {python} {input} {output}</div>
+    <input type="text" id="legacyCmd" placeholder="{python} legacy/my_script.py {input} {output}">
+    <div class="row"><button class="alt" onclick="saveMeta()">Save command</button><button id="runLegacy" onclick="post('run_legacy',{},'Legacy output created')">Run legacy script</button><span class="hint" id="h_runLegacy"></span></div></details>
+</div>
+
+<div class="card" id="c4"><h2><span class="dot">4</span>New Python job <span class="st" id="s4"></span></h2>
+  <div id="cp_convert"></div>
+  <textarea id="code" style="min-height:200px" placeholder="Paste the new Python code here"></textarea>
+  <div class="row"><button class="alt" onclick="saveCode()">Save code</button><span class="hint">Saving removes any earlier approval.</span></div>
+  <div class="row"><input type="text" id="reviewer" placeholder="Your name" style="width:180px"><button id="approveCode" onclick="approve('new_job','approve')">I reviewed the code: Approve</button>
+    <button id="runModern" onclick="post('run_modern',{},'New job ran')">Run new job</button><span class="hint" id="h_runModern"></span></div>
+</div>
+
+<div class="card" id="c5"><h2><span class="dot">5</span>Check <span class="st" id="s5"></span></h2>
+  <div class="row"><button id="runCheck" onclick="runCheck()">Run parity check</button><span class="hint" id="h_runCheck"></span></div>
+  <div id="result" class="banner none">Not run yet</div><div id="resultDetail"></div>
+  <details><summary>Comparison settings</summary>
+    <div class="row"><label>Match rows by column(s):</label><input type="text" id="keys" style="width:220px" placeholder="e.g. account_id (blank = by row order)"></div>
+    <div class="row"><label>Allowed difference for numbers:</label><input type="text" id="tol" style="width:80px"><button class="alt" onclick="saveMeta()">Save</button></div></details>
+</div>
+
+<div class="card" id="c6"><h2><span class="dot">6</span>Sign off and report <span class="st" id="s6"></span></h2>
+  <div class="row"><input type="text" id="resComment" placeholder="Comment (optional)" style="flex:1"><button onclick="approve('results','approve')">Approve results</button><button class="red" onclick="approve('results','reject')">Reject</button></div>
+  <div class="row"><a id="reportLink" href="#" download><button class="alt" type="button">Download report</button></a></div>
+  <div id="cp_cloud"></div>
+  <details><summary>Audit log</summary><div id="audit"></div></details>
+</div>
+</main>
+<div id="msg"></div>
+
+<script>
+let job=null, cfg={}, state={};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(t,bad){const m=$('msg');m.textContent=t;m.className=bad?'err':'good';m.style.display='block';clearTimeout(m.t);m.t=setTimeout(()=>m.style.display='none',bad?10000:2500)}
+function busy(text){const m=$('msg');clearTimeout(m.t);
+  if(text){document.body.classList.add('busy');m.className='wait';m.innerHTML='<span class="spin"></span>'+esc(text);m.style.display='block'}
+  else{document.body.classList.remove('busy');if(m.className==='wait')m.style.display='none'}}
+const WORK={run_legacy:'Running the legacy script... please wait',run_modern:'Running the new job... please wait',check:'Comparing outputs...',ask_copilot:'Asking Copilot... please wait',use_generated_input:'Saving...',use_generated_expected:'Saving...'};
+async function call(method,url,body){
+  const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+  const t=await r.text();let d;try{d=JSON.parse(t)}catch(e){d=t}
+  if(!r.ok) throw new Error(d.error||t);return d}
+async function guard(fn){try{return await fn()}catch(e){toast(e.message,true)}}
+
+/* Copilot panel shown inside a card */
+const PANELS={
+ analyze:['Copilot: explain the rules and tech debt',''],
+ gen_input:['Copilot: generate sample input data','<button class="alt" onclick="useGenerated()">Use reply as input data</button>'],
+ convert:['Copilot: write the new Python job','<button class="alt" onclick="useAsCode()">Use reply as new code</button>'],
+ gen_expected:['Copilot: predict the legacy output (UNVERIFIED, for dry runs only)','<button class="alt" onclick="useExpected()">Use reply as legacy output (unverified)</button>'],
+ cloud:['Copilot: AWS / Azure starter code (optional, not run)','']};
+function panel(step){const [title,extra]=PANELS[step];return `<details><summary>${title}</summary>
+  <div class="hint">1) Build the prompt, 2) copy it into Copilot Chat, 3) paste the reply here and save.</div>
+  <div class="row"><button class="alt" onclick="buildPrompt('${step}')">Build prompt</button><button class="alt" onclick="copyPrompt('${step}')">Copy</button><button class="alt askbtn" onclick="askCopilot('${step}')" hidden>Ask Copilot directly</button></div>
+  <textarea id="p_${step}" readonly placeholder="Prompt appears here"></textarea>
+  <textarea id="a_${step}" placeholder="Paste Copilot's reply here"></textarea>
+  <div class="row"><button onclick="saveAnswer('${step}')">Save reply</button>${extra}</div></details>`}
+for(const s of Object.keys(PANELS)) $('cp_'+s).innerHTML=panel(s);
+
+async function init(){cfg=await call('GET','/api/settings');$('reviewer').value=cfg.reviewer||'';
+  document.querySelectorAll('.askbtn').forEach(b=>b.hidden=!cfg.copilot_command);await refreshJobs()}
+async function refreshJobs(sel){const d=await call('GET','/api/jobs');const s=$('job');
+  s.innerHTML=d.jobs.map(j=>`<option>${esc(j)}</option>`).join('');if(sel)s.value=sel;s.onchange=()=>load(s.value);
+  $('main').hidden=!d.jobs.length;if(d.jobs.length)load(s.value)}
+async function newJob(){await guard(async()=>{const n=$('newName').value.trim();await call('POST','/api/jobs',{name:n});$('newName').value='';await refreshJobs(n);toast('Job created')})}
+
+function nextStep(s){
+  if(!s.sources.length) return [1,'Add your legacy script (upload or paste).'];
+  if(!s.has_input) return [2,'Add input data, or let Copilot generate sample data from your script.'];
+  if(!s.has_expected) return [3,'Add the legacy output (what the old system produced for that input), or run the legacy script here.'];
+  if(!s.new_job.trim()) return [4,'Ask Copilot for the new Python job and paste it in.'];
+  if(!s.code_approved) return [4,'Review the new code, then click Approve.'];
+  if(!s.has_modern_output) return [4,'Click Run new job.'];
+  if(!s.last_check) return [5,'Click Run parity check.'];
+  return [6,s.last_check.passed?'Parity passed. Sign off and download the report.':'Parity failed. Look at the differences below, fix the new code (Copilot can help), approve it and run again.'];
+}
+async function load(name){
+  job=name;const s=state=await call('GET','/api/job/'+name);$('job').value=name;
+  const [n,text]=nextStep(s);$('next').innerHTML=`<b>Job ${esc(name)} - next step:</b> ${esc(text)}`;
+  const done={1:s.sources.length>0,2:s.has_input,3:s.has_expected,4:s.has_modern_output&&s.code_approved,5:!!s.last_check,6:false};
+  for(let i=1;i<=6;i++){const c=$('c'+i);c.className='card'+(done[i]?' done':'')+(i===n?' now':'')}
+  $('s1').textContent=s.sources.length?s.sources.join(', '):'missing';
+  $('s2').textContent=s.has_input?'added'+(s.meta.input_origin==='generated'?' (sample data)':''):'missing';
+  $('s3').textContent=s.has_expected?'added'+(String(s.meta.expected_origin).indexOf('UNVERIFIED')>=0?' (Copilot-predicted, UNVERIFIED)':''):'missing';
+  $('s4').textContent=s.code_approved?'approved':(s.new_job.trim()?'needs approval':'missing');
+  $('s5').textContent=s.last_check?(s.last_check.passed?'PASS':'FAIL'):'not run';
+  $('legacyCmd').value=s.meta.legacy_cmd||'';$('keys').value=s.meta.key_columns||'';$('tol').value=s.meta.tolerance||'0';
+  $('code').value=s.new_job;
+  for(const st of Object.keys(PANELS)) $('a_'+st).value=s.answers[st]||'';
+  $('runLegacy').disabled=!(s.meta.legacy_cmd&&s.has_input);
+  $('approveCode').disabled=!s.new_job.trim();$('runModern').disabled=!(s.code_approved&&s.has_input);
+  $('runCheck').disabled=!(s.has_modern_output&&s.has_expected);
+  const need=(...a)=>a.filter(Boolean).join(' and ');
+  $('h_runLegacy').textContent=$('runLegacy').disabled?'Needs: '+need(!s.meta.legacy_cmd&&'a saved command',!s.has_input&&'input data (step 2)'):'';
+  $('h_runModern').textContent=$('runModern').disabled?'Needs: '+need(!s.new_job.trim()&&'new code',s.new_job.trim()&&!s.code_approved&&'approval of the code',!s.has_input&&'input data (step 2)'):'';
+  $('h_runCheck').textContent=$('runCheck').disabled?'Needs: '+need(!s.has_modern_output&&'a run of the new job (step 4)',!s.has_expected&&'the legacy output (step 3)'):'';
+  renderResult(s.last_check);$('reportLink').href='/api/job/'+name+'/report';$('reportLink').download=name+'_parity_report.md';
+  const a=await call('GET','/api/job/'+name+'/audit');
+  $('audit').innerHTML='<table><tr><th>Time</th><th>Who</th><th>Action</th><th>Item</th><th>Decision</th><th>Comment</th></tr>'+
+    a.audit.slice().reverse().slice(0,40).map(r=>`<tr><td>${esc(r.time)}</td><td>${esc(r.reviewer)}</td><td>${esc(r.action)}</td><td>${esc(r.artifact)}</td><td>${esc(r.decision)}</td><td>${esc(r.comment)}</td></tr>`).join('')+'</table>';
+}
+async function post(action,body,ok){busy(WORK[action]||'Working...');try{await guard(async()=>{const d=await call('POST','/api/job/'+job+'/'+action,body);busy(false);toast(ok+(d.message?'\n'+d.message:''));await load(job)})}finally{busy(false)}}
+async function putFile(body,ok){await guard(async()=>{await call('POST','/api/job/'+job+'/file',body);toast(ok||'Saved');await load(job)})}
+
+async function upload(kind){await guard(async()=>{const files=$('f_'+kind).files;if(!files.length)return;
+  for(const f of files){const body={kind,content:await f.text()};if(kind==='source')body.filename=f.name.replace(/[^A-Za-z0-9_.-]/g,'_');await call('POST','/api/job/'+job+'/file',body)}
+  $('f_'+kind).value='';toast('Saved');await load(job)})}
+async function pasteSource(){const n=$('pName').value.trim(),t=$('pSrc').value;
+  if(!n||!t.trim())return toast('Enter a file name and paste the script.',true);
+  await putFile({kind:'source',filename:n.replace(/[^A-Za-z0-9_.-]/g,'_'),content:t},'Script saved');$('pSrc').value='';$('pName').value=''}
+async function pasteCsv(kind,id){const t=$(id).value;if(!t.trim())return toast('Paste the CSV first.',true);await putFile({kind,content:t});$(id).value=''}
+async function saveMeta(){await post('meta',{legacy_cmd:$('legacyCmd').value,key_columns:$('keys').value,tolerance:$('tol').value||'0'},'Settings saved')}
+
+async function buildPrompt(step){await guard(async()=>{const d=await call('GET','/api/job/'+job+'/prompt?step='+step);$('p_'+step).value=d.prompt;toast('Prompt ready. Click Copy.')})}
+async function copyPrompt(step){const t=$('p_'+step);if(!t.value)return toast('Click Build prompt first.',true);t.select();
+  try{await navigator.clipboard.writeText(t.value)}catch(e){document.execCommand('copy')}toast('Copied. Paste it into Copilot Chat.')}
+async function saveAnswer(step){await putFile({kind:'answer',filename:step,content:$('a_'+step).value},'Reply saved')}
+async function askCopilot(step){busy(WORK.ask_copilot);try{await guard(async()=>{const d=await call('POST','/api/job/'+job+'/ask_copilot',{step});$('a_'+step).value=d.answer;busy(false);toast('Reply saved');await load(job)})}finally{busy(false)}}
+async function useGenerated(){await saveAnswer('gen_input');await post('use_generated_input',{},'Saved as input data (sample data)')}
+async function useExpected(){await saveAnswer('gen_expected');await post('use_generated_expected',{},'Saved as legacy output (UNVERIFIED)')}
+async function useAsCode(){const lines=$('a_convert').value.split('\n').filter(l=>!l.trim().startsWith('```'));
+  await call('POST','/api/job/'+job+'/file',{kind:'answer',filename:'convert',content:$('a_convert').value});
+  await putFile({kind:'new_job',content:lines.join('\n')},'Saved as new code. Review it, then Approve.')}
+async function saveCode(){await putFile({kind:'new_job',content:$('code').value},'Code saved. Approve it again.')}
+async function approve(artifact,decision){await post('approve',{artifact,decision,reviewer:$('reviewer').value,comment:$('resComment').value},'Recorded: '+decision)}
+async function runCheck(){busy(WORK.check);try{await guard(async()=>{const r=await call('POST','/api/job/'+job+'/check',{});renderResult(r);await load(job)})}finally{busy(false)}}
+
+function renderResult(r){const b=$('result'),d=$('resultDetail');
+  if(!r){b.className='banner none';b.textContent='Not run yet';d.innerHTML='';return}
+  b.className='banner '+(r.passed?'pass':'fail');b.textContent=job+': '+(r.passed?'PASS':'FAIL')+' ('+r.data_label+') - '+r.diff_count+' difference(s)';
+  let h=`<p class="hint">Legacy rows: ${r.expected_rows}, new rows: ${r.actual_rows}. Compared ${r.key_columns.length?'by '+esc(r.key_columns.join(',')):'row by row'}.</p>`;
+  if(r.unverified)h+='<p class="warn"><b>UNVERIFIED:</b> the legacy output was predicted by Copilot, not produced by the real legacy system. A PASS here is not proof. Get the real output and re-check.</p>';
+  else if(r.passed&&r.data_label==='sample data')h+='<p class="warn">Passed on generated sample data only. Real data may expose cases the sample missed.</p>';
+  const cd=Object.entries(r.columns_diverged);if(cd.length)h+='<p>Columns that differ: '+cd.map(([c,n])=>esc(c)+' ('+n+')').join(', ')+'</p>';
+  if(r.diffs.length)h+='<table><tr><th>Type</th><th>Where</th><th>Column</th><th>Legacy</th><th>New</th></tr>'+r.diffs.map(x=>`<tr><td>${esc(x.type)}</td><td>${esc(x.where)}</td><td>${esc(x.column)}</td><td>${esc(x.expected)}</td><td>${esc(x.actual)}</td></tr>`).join('')+'</table>';
+  if(r.preview){const pv=r.preview;const tbl=(rows,other)=>'<table><tr>'+pv.header.map(c=>'<th>'+esc(c)+'</th>').join('')+'</tr>'+
+      rows.map((row,i)=>'<tr>'+row.map((v,j)=>{const o=other[i]&&other[i][j];return '<td'+(o!==undefined&&o!==v?' style="background:#fdecea"':'')+'>'+esc(v)+'</td>'}).join('')+'</tr>').join('')+'</table>';
+    h+='<h3 style="font-size:14px;margin:14px 0 4px">First '+Math.max(pv.expected.length,pv.actual.length)+' rows of each output</h3>'+
+       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;overflow-x:auto"><div><b>Legacy output</b>'+tbl(pv.expected,pv.actual)+'</div><div><b>New job output</b>'+tbl(pv.actual,pv.expected)+'</div></div>'+
+       '<p class="hint">Red cells differ at the same row position. If you matched rows by key, row order may differ, so use the table above for real differences.</p>'}
+  d.innerHTML=h}
+init().catch(e=>toast(e.message,true));
+</script></body></html>

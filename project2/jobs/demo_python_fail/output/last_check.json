@@ -1,0 +1,65 @@
+{
+  "passed": false,
+  "expected_rows": 8,
+  "actual_rows": 8,
+  "diff_count": 6,
+  "diffs": [
+    {
+      "type": "value",
+      "where": "key=ACC001",
+      "column": "total_cad",
+      "expected": "2141.12",
+      "actual": "2141.15"
+    },
+    {
+      "type": "value",
+      "where": "key=ACC002",
+      "column": "total_cad",
+      "expected": "2996.50",
+      "actual": "2996.51"
+    },
+    {
+      "type": "value",
+      "where": "key=ACC003",
+      "column": "total_cad",
+      "expected": "2155.10",
+      "actual": "2155.12"
+    },
+    {
+      "type": "value",
+      "where": "key=ACC004",
+      "column": "total_cad",
+      "expected": "894.26",
+      "actual": "894.28"
+    },
+    {
+      "type": "value",
+      "where": "key=ACC007",
+      "column": "total_cad",
+      "expected": "866.16",
+      "actual": "866.19"
+    },
+    {
+      "type": "value",
+      "where": "key=ACC008",
+      "column": "total_cad",
+      "expected": "527.40",
+      "actual": "527.43"
+    }
+  ],
+  "columns_diverged": {
+    "total_cad": 6
+  },
+  "header_ok": true,
+  "checked_at": "2026-11-25T14:00:26",
+  "data_label": "provided data",
+  "input_origin": "provided",
+  "expected_origin": "legacy script run here",
+  "input_sha": "5cd211174da698f60aac7fa189f1e8175d5c7baab277877feced61d85a6944a2",
+  "expected_sha": "e9cd0bbf80d35bc7065d13dd648f8cbe8a9dc8471803f35d8f0b34ae7b072227",
+  "modern_sha": "9e91d70c8d230664583c3bafad242f5a852ff27866a3ba02fc2e649f9d71a1aa",
+  "key_columns": [
+    "account_id"
+  ],
+  "tolerance": "0"
+}

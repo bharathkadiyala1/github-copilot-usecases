@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "expected_rows": 8,
+  "actual_rows": 8,
+  "diff_count": 0,
+  "diffs": [],
+  "columns_diverged": {},
+  "header_ok": true,
+  "checked_at": "2026-11-25T14:01:02",
+  "data_label": "provided data",
+  "input_origin": "provided",
+  "expected_origin": "legacy script run here",
+  "input_sha": "5cd211174da698f60aac7fa189f1e8175d5c7baab277877feced61d85a6944a2",
+  "expected_sha": "e9cd0bbf80d35bc7065d13dd648f8cbe8a9dc8471803f35d8f0b34ae7b072227",
+  "modern_sha": "e9cd0bbf80d35bc7065d13dd648f8cbe8a9dc8471803f35d8f0b34ae7b072227",
+  "key_columns": [
+    "account_id"
+  ],
+  "tolerance": "0"
+}

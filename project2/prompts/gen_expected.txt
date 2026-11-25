@@ -1,0 +1,12 @@
+You are acting as the legacy system. All data is mock data.
+
+Work out, by carefully tracing the legacy source below, the exact output it would produce for the input data below.
+Follow its exact behaviour including quirks (rounding style, skipped or rejected rows, ordering, number formatting).
+Reply with ONLY the output as CSV text: first line is the header, no explanations, no code fences.
+If you cannot be sure of a value, still give your best trace; a person will compare it against the real system later.
+
+LEGACY SOURCE:
+{source}
+
+INPUT DATA:
+{input_full}

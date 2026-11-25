@@ -1,0 +1,10 @@
+Below is a working Python job that replaces a legacy job. Convert it into a starter skeleton for: {target}.
+Keep the same business rules. Use that platform's usual structure (job/pipeline definition, read, transform, write, logging, parameters).
+Mark anything you are unsure about with TODO. Do not invent credentials or resource names; use placeholders.
+This skeleton will be reviewed by a person and will not be run by the tool.
+
+PYTHON JOB:
+{python_job}
+
+BUSINESS RULES:
+{rules}

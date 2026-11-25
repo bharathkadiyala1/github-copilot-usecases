@@ -1,0 +1,8 @@
+{
+  "key_columns": "account_id",
+  "tolerance": "0",
+  "legacy_cmd": "{python} legacy/legacy_etl.py {input} {output}",
+  "modern_cmd": "{python} new_job.py {input} {output}",
+  "input_origin": "provided",
+  "expected_origin": "legacy script run here"
+}

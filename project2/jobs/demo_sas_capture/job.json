@@ -1,0 +1,8 @@
+{
+  "key_columns": "account_id",
+  "tolerance": "0",
+  "legacy_cmd": "",
+  "modern_cmd": "{python} new_job.py {input} {output}",
+  "input_origin": "provided",
+  "expected_origin": "captured from SAS (SIMULATED for this demo)"
+}
