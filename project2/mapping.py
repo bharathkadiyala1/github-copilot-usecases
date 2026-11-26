@@ -11,14 +11,9 @@ NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
       "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"}
 REL = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
 
-MAP_HEADERS = [("id", "Map ID"), ("source_system", "Source System"), ("source_schema", "Source Schema"),
-               ("source_table", "Source Table"), ("source_column", "Source Column"), ("source_type", "Source Data Type"),
-               ("target_schema", "Target Schema"), ("target_table", "Target Table"), ("target_column", "Target Column"),
-               ("target_type", "Target Data Type"), ("key", "Key"), ("logic", "Transformation / Business Logic"),
-               ("nullable", "Nullable"), ("notes", "Notes")]
-RULE_HEADERS = [("seq", "Seq"), ("type", "Type"), ("name", "Rule Name"), ("left", "Left Table (Alias)"),
-                ("right", "Right Table (Alias)"), ("join_type", "Join Type"), ("expr", "Join Condition / Filter Expression"),
-                ("logic", "Business Logic / Rationale"), ("applies", "Applies To Map IDs")]
+from schema import MAP_HEADERS, RULE_HEADERS, Unresolved
+import schema
+
 SHEET_NAMES = ("Source_Target_Mapping", "Joins_Filters")
 
 
@@ -30,8 +25,16 @@ def _col_index(ref):
     return n - 1
 
 
+def _cell_ref(ref):
+    m = re.match(r"([A-Z]+)(\d+)", ref)
+    return int(m.group(2)) - 1, _col_index(m.group(1))
+
+
 def read_xlsx(data):
-    """bytes of an .xlsx -> {sheet name: [[cell text, ...], ...]}. Formulas are read as their last saved value."""
+    """bytes of an .xlsx -> {sheet name: [[cell text, ...], ...]}.
+
+    Row n of the list is row n+1 of the sheet (blank rows are kept as []), cells merged downwards repeat their value on each row, formulas read as their last saved value, booleans as TRUE/FALSE, error cells as blank.
+    """
     try:
         z = zipfile.ZipFile(io.BytesIO(data))
         workbook = ET.fromstring(z.read("xl/workbook.xml"))
@@ -46,106 +49,81 @@ def read_xlsx(data):
     for sheet in workbook.iterfind("m:sheets/m:sheet", NS):
         target = rels[sheet.get(REL)].lstrip("/")
         path = target if target.startswith("xl/") else "xl/" + target
-        rows = []
-        for row in ET.fromstring(z.read(path)).iterfind(".//m:row", NS):
-            cells = {}
+        try:
+            root = ET.fromstring(z.read(path))
+        except (KeyError, ET.ParseError):
+            continue                                        # a chart sheet or damaged part has no cells to read
+        grid = {}
+        for row in root.iterfind(".//m:row", NS):
             for c in row.iterfind("m:c", NS):
                 kind, v = c.get("t"), c.find("m:v", NS)
                 if kind == "s" and v is not None:
                     text = shared[int(v.text)]
                 elif kind == "inlineStr":
                     text = "".join(t.text or "" for t in c.iter("{%s}t" % NS["m"]))
+                elif kind == "b":
+                    text = "TRUE" if v is not None and v.text == "1" else "FALSE"
+                elif kind == "e":
+                    text = ""
                 else:
                     text = v.text if v is not None and v.text is not None else ""
-                cells[_col_index(c.get("r"))] = text
-            if cells:
-                rows.append([cells.get(i, "") for i in range(max(cells) + 1)])
+                if c.get("r"):
+                    grid[_cell_ref(c.get("r"))] = text
+        for mc in root.iterfind(".//m:mergeCells/m:mergeCell", NS):
+            try:
+                (r1, c1), (r2, c2) = (_cell_ref(x) for x in mc.get("ref").split(":"))
+            except (AttributeError, ValueError):
+                continue
+            if (r2 - r1 + 1) * (c2 - c1 + 1) > 5000:
+                continue
+            top = grid.get((r1, c1), "")
+            for r in range(r1 + 1, r2 + 1):                  # a value merged down repeats on each row; a title merged across stays put
+                grid.setdefault((r, c1), top)
+        rows = []
+        if grid:
+            for r in range(max(k[0] for k in grid) + 1):
+                width = max((c for (rr, c) in grid if rr == r), default=-1) + 1
+                rows.append([grid.get((r, c), "") for c in range(width)])
         sheets[sheet.get("name")] = rows
     return sheets
 
 
-# ------------------------------------------------------------------ understand the layout
-def _norm(text):
-    return re.sub(r"[^a-z0-9]", "", str(text).lower())
+def read_any(data, filename=""):
+    """An .xlsx workbook, or CSV / tab / markdown / JSON text, as {name: rows}."""
+    if data[:2] == b"PK":
+        return read_xlsx(data)
+    if filename.lower().endswith((".xlsx", ".xlsm")):
+        raise ValueError("That file is not a valid .xlsx workbook.")
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = data.decode("latin-1")
+    grids = schema.grids_from_text(text)
+    if not grids:
+        raise ValueError("That file is not a workbook or a table of text (CSV, tab separated, markdown or JSON).")
+    return grids
 
 
-def _map_field(h):
-    table = {"mapid": "id", "id": "id", "mappingid": "id", "sourcesystem": "source_system", "sourceschema": "source_schema",
-             "sourcetable": "source_table", "sourcecolumn": "source_column", "sourcedatatype": "source_type", "sourcetype": "source_type",
-             "targetschema": "target_schema", "targettable": "target_table", "targetcolumn": "target_column",
-             "targetdatatype": "target_type", "targettype": "target_type", "key": "key", "nullable": "nullable", "notes": "notes", "comments": "notes"}
-    if h in table:
-        return table[h]
-    return "logic" if ("transformation" in h or "logic" in h) else None
-
-
-def _rule_field(h):
-    if h in ("seq", "sequence", "step", "order"):
-        return "seq"
-    if h in ("type", "ruletype"):
-        return "type"
-    if h in ("rulename", "name"):
-        return "name"
-    if h.startswith("lefttable"):
-        return "left"
-    if h.startswith("righttable"):
-        return "right"
-    if h == "jointype":
-        return "join_type"
-    if "condition" in h or "expression" in h:
-        return "expr"
-    if "rationale" in h or "logic" in h:
-        return "logic"
-    if "appliesto" in h or h == "mapids":
-        return "applies"
-    return None
-
-
-def _table_from(rows, field_of, needed, keep):
-    """Find the header row (it holds all `needed` fields) and return the rows below it as dicts."""
-    for i, row in enumerate(rows):
-        fields = {}
-        for j, cell in enumerate(row):
-            f = field_of(_norm(cell))
-            if f and f not in fields:
-                fields[f] = j
-        if all(n in fields for n in needed):
-            out = []
-            for r in rows[i + 1:]:
-                item = {f: (r[j].strip() if j < len(r) else "") for f, j in fields.items()}
-                if keep(item):
-                    out.append(item)
-            return out
-    return None
-
-
-def parse_workbook(sheets):
-    """Find the mapping table, the joins/filters table and any reference SQL in any sheet."""
-    mappings, rules, reference = None, None, ""
+# ------------------------------------------------------------------ understand the layout (see schema.py)
+def _find_reference_sql(sheets):
     for rows in sheets.values():
-        if mappings is None:
-            mappings = _table_from(rows, _map_field, ("target_column", "source_column"), lambda i: i.get("target_column") or i.get("id"))
-        if rules is None:
-            rules = _table_from(rows, _rule_field, ("seq", "expr"), lambda i: i.get("type") or i.get("expr"))
         for row in rows:
             for cell in row:
                 low = cell.lower()
                 if len(cell) > 80 and "select" in low and "from" in low and re.match(r"\s*(insert|with|select|merge|create)", low):
-                    reference = reference or cell
-    if mappings is None:
-        raise ValueError("Could not find a mapping table. It needs columns named 'Source Column' and 'Target Column'.")
-    for m in mappings:
-        for f, _ in MAP_HEADERS:
-            m.setdefault(f, "")
-    rules = rules or []
-    for r in rules:
-        for f, _ in RULE_HEADERS:
-            r.setdefault(f, "")
-    return {"mappings": mappings, "rules": rules, "reference_sql": reference}
+                    return cell
+    return ""
 
 
-def load_xlsx(data):
-    return parse_workbook(read_xlsx(data))
+def parse_workbook(sheets, overrides=None):
+    """Find the mapping table, the joins/filters table and any reference SQL in any sheet, whatever they are called."""
+    model, _ = schema.resolve(sheets, overrides)
+    model["reference_sql"] = _find_reference_sql(sheets)
+    return model
+
+
+def load_xlsx(data, overrides=None, filename=""):
+    return parse_workbook(read_any(data, filename), overrides)
 
 
 # ------------------------------------------------------------------ small facts
@@ -398,49 +376,16 @@ def render_model(model):
 
 
 # ------------------------------------------------------------------ read a Copilot reply back into a model
-def _md_tables(text):
-    lines = [l for l in text.replace("\r", "").split("\n") if not l.strip().startswith("```")]
-    tables, i = [], 0
-    split = lambda l: [c.strip() for c in l.strip().strip("|").split("|")]
-    while i < len(lines) - 1:
-        if lines[i].count("|") >= 2 and re.match(r"^\s*\|?\s*:?-{2,}", lines[i + 1]):
-            head, rows, i = split(lines[i]), [], i + 2
-            while i < len(lines) and lines[i].count("|") >= 2:
-                rows.append(split(lines[i]))
-                i += 1
-            tables.append((head, rows))
-        else:
-            i += 1
-    return tables
-
-
-def model_from_reply(text):
-    """Turn the two markdown tables in a Copilot reply into the same model that load_xlsx gives."""
-    mappings = rules = None
-    for head, rows in _md_tables(text):
-        norm = [_norm(h) for h in head]
-        for field_of, needed in ((_map_field, ("target_column", "source_column")), (_rule_field, ("seq", "expr"))):
-            fields = {}
-            for j, h in enumerate(norm):
-                f = field_of(h)
-                if f and f not in fields:
-                    fields[f] = j
-            if all(n in fields for n in needed):
-                items = [{f: (r[j] if j < len(r) else "") for f, j in fields.items()} for r in rows]
-                if field_of is _map_field and mappings is None:
-                    mappings = items
-                elif field_of is _rule_field and rules is None and "target_column" not in fields:
-                    rules = items
-    if mappings is None:
-        raise ValueError("No mapping table found in the reply. It needs two tables: Source_Target_Mapping and Joins_Filters.")
-    for m in mappings:
-        for f, _ in MAP_HEADERS:
-            m.setdefault(f, "")
-    rules = rules or []
-    for r in rules:
-        for f, _ in RULE_HEADERS:
-            r.setdefault(f, "")
-    return {"mappings": mappings, "rules": rules, "reference_sql": ""}
+def model_from_reply(text, overrides=None):
+    """Turn the tables in a Copilot reply (markdown, CSV, tab separated or JSON) into the same model that load_xlsx gives."""
+    grids = schema.grids_from_text(text)
+    if not grids:
+        raise Unresolved("No mapping table found in the reply. It needs two tables: Source_Target_Mapping and Joins_Filters.")
+    try:
+        model, _ = schema.resolve(grids, overrides)
+    except Unresolved as e:
+        raise Unresolved("No mapping table found in the reply. " + str(e), e.report, e.grids)
+    return model
 
 
 # ------------------------------------------------------------------ write .xlsx

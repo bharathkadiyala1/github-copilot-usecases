@@ -10,7 +10,16 @@ Requirements:
 
 Reply in this exact shape:
 1. One fenced code block (```sql) with the full statement.
-2. A section "## Assumptions and open questions" as bullets.
-3. A section "## Rule traceability" as a table with columns: Rule or Map ID | Where in the code.
+2. A section "## Unit tests" with ONE fenced code block (```python): a complete, self-contained pytest file for the statement above (rules below).
+3. A section "## Assumptions and open questions" as bullets.
+4. A section "## Rule traceability" as a table with columns: Rule or Map ID | Where in the code.
+
+Rules for the unit tests (a test with no assertion, or `assert True`, does not count):
+- Use DuckDB (`import duckdb`) in memory. Create the source and target tables from the mapping with small mock rows, read the statement from the file `generated.sql` in the same folder as the test file, run it, and select the target rows to assert on.
+- DuckDB does not accept `:name` parameters: in a helper, replace each `:name` with `$name` and pass a dict of values.
+- Write ONE test function per Map ID, named test_<MapID>_<target_column> (for example test_M06_closing_balance_cad), and ONE per join, filter, dedup and aggregation rule, named test_rule_<Seq>_<short_name> (for example test_rule_4_fx_rate). Put the Map ID or "Rule <Seq>" in the function's docstring too.
+- Each test uses its own tiny input rows and asserts the exact expected target values, including the edge case the rule exists for (no match, NULL, duplicate, boundary date, default value).
+- If DuckDB cannot run something in this dialect, keep the test but call pytest.skip("<reason>") inside it. Do not delete it.
+- No network, no files other than generated.sql, no real data.
 
 {update_block}{mapping}

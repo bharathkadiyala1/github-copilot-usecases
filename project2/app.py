@@ -42,6 +42,8 @@ def api(method, path, query, body):
             return workflows.mapping_state(CFG, name)
         if method == "GET" and action == "derived":
             return workflows.derived_state(CFG, name)
+        if method == "GET" and action == "doc":
+            return {"markdown": workflows.documentation(CFG, name, query.get("version"), query.get("target"))}
         if method == "GET" and action == "download":
             return ("bytes",) + workflows.download(CFG, name, query.get("what", ""), query.get("version"))
         if method == "GET" and action == "derived_compare":
@@ -68,6 +70,12 @@ def api(method, path, query, body):
                 return {"ok": True}
             if action == "mapping_upload":
                 return workflows.save_mapping_upload(CFG, name, body.get("filename", ""), body.get("b64", ""), body.get("note", ""))
+            if action == "mapping_resolve":
+                return workflows.resolve_pending(CFG, name, body.get("overrides"), bool(body.get("use_reply")))
+            if action == "mapping_confirm":
+                return workflows.confirm_pending(CFG, name)
+            if action == "mapping_discard":
+                return workflows.discard_pending(CFG, name)
             if action == "save_generated":
                 return workflows.save_generated(CFG, name, body.get("target", ""))
             if action == "parse_reply":

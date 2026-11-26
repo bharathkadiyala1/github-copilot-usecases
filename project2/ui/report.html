@@ -19,7 +19,7 @@ section.card{scroll-margin-top:120px}
   <a class="btn noprint" href="/parity">&larr; Workbench</a></div>
 <div class="wrap" id="root"><p class="hint">Loading...</p></div>
 <footer class="foot">Mock data only &middot; AI-assisted, human-approved &middot; generated <span id="gen"></span></footer>
-<script src="/ui/md.js"></script><script src="/ui/nav.js"></script>
+<script src="/ui/md.js"></script><script src="/ui/nav.js"></script><script src="/ui/review.js"></script>
 <script>
 const job=new URLSearchParams(location.search).get('job')||'';
 const e=escapeHtml;
@@ -70,7 +70,7 @@ function render(d){
     tiles([[s.columns,'Target columns'],[s.rules,'Rules'],[srcs.length,'Source tables'],[Object.values(s.joins).reduce((a,b)=>a+b,0),'Joins'],[s.filters,'Filters']])+
     (m.versions&&m.versions.length>1?'<h3 style="font-size:15px">Version history</h3>'+table(['Version','Uploaded','By','Note','Changes vs previous'],m.versions.slice().reverse().map(v=>['v'+v.n,e((v.uploaded||'').replace('T',' ')),e(v.by||''),e(v.note||''),e(v.summary)]))+'<h3 style="font-size:15px">Latest changes (v'+(m.version-1)+' to v'+m.version+')</h3>'+diffHtml(m.diff):'')+
     '<h3 style="font-size:15px">Checks on the document</h3>'+lintHtml(m.lint)+(m.reference_coverage?'<h3 style="font-size:15px">Reference SQL in the workbook vs its own rules</h3>'+coverageHtml(m.reference_coverage,'Reference SQL'):'')+
-    Object.keys(m.generated).map(t=>'<h3 style="font-size:15px">Generated '+(t==='sql'?'SQL':'PySpark')+' <span class="pill '+(m.generated[t].approved?'ok':'warn')+'">'+(m.generated[t].approved?'signed off':'not signed off')+'</span></h3>'+coverageHtml(m.generated[t].coverage,'Mapping items found in the generated code')+'<details><summary>Show the code</summary><div class="md"><pre><code>'+e(m.generated[t].code)+'</code></pre></div></details>').join('')+'</section>'}
+    Object.keys(m.generated).map(t=>'<h3 style="font-size:15px">Generated '+(t==='sql'?'SQL':'PySpark')+' <span class="pill '+(m.generated[t].approved?'ok':'warn')+'">'+(m.generated[t].approved?'signed off':'not signed off')+'</span></h3>'+coverageHtml(m.generated[t].coverage,'Mapping items found in the generated code')+testsHtml(m.generated[t])+'<details><summary>Show the generated documentation</summary><div class="md">'+md((m.documentation||{})[t]||'')+'</div></details><details><summary>Show the code</summary><div class="md"><pre><code>'+e(m.generated[t].code)+'</code></pre></div></details>').join('')+'</section>'}
   if(d.derived){const m=d.derived;h+=`<section id="derived" class="card"><h2>Mapping built from code <span class="pill ${m.approved?'ok':'warn'}">${m.approved?'signed off':'not signed off'}</span></h2>`+
     (m.versions&&m.versions.length>1?'<h3 style="font-size:15px">Version history</h3>'+table(['Version','Built','By','Note','What changed'],m.versions.slice().reverse().map(v=>['v'+v.n,e((v.uploaded||'').replace('T',' ')),e(v.by||''),e(v.note||''),e(v.summary)]))+'<h3 style="font-size:15px">Latest mapping changes (v'+(m.version-1)+' to v'+m.version+')</h3>'+diffHtml(m.diff):'')+
     '<h3 style="font-size:15px">Source to target mapping</h3>'+mappingTable(m.model)+'<h3 style="font-size:15px">Joins, filters and rules</h3>'+rulesTable(m.model)+'<h3 style="font-size:15px">Checks on the mapping</h3>'+lintHtml(m.lint)+(m.coverage?'<h3 style="font-size:15px">Rule coverage: does the mapping match the code?</h3>'+coverageHtml(m.coverage,'Mapping items found in the code'):'')+'</section>'}

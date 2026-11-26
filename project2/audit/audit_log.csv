@@ -106,3 +106,4 @@ time,reviewer,job,action,artifact,sha256,decision,comment
 2026-11-25T17:18:22,,demo_python_pass,file_saved,code_to_mapping.md,e4d9f982057a82828981c2b26e4bb4ac01dba01d46e9ab60f9ce82f68f2da7c0,,
 2026-11-25T17:18:22,your name,demo_python_pass,mapping_parsed,derived.json,47d781f8b2983b37bb0a8f4c97b884f1043db225bff0fff1c0552300d34cff9b,,"3 columns, 4 rules"
 2026-11-25T17:18:32,your name,demo_python_pass,download,mapping.xlsx,47d781f8b2983b37bb0a8f4c97b884f1043db225bff0fff1c0552300d34cff9b,,
+2026-11-25T21:24:01,your name,demo_python_pass,review,results,e9cd0bbf80d35bc7065d13dd648f8cbe8a9dc8471803f35d8f0b34ae7b072227,approve,results are aligned

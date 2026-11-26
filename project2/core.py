@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 FILE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
-STEPS = ("analyze", "gen_input", "gen_expected", "convert", "cloud", "explain", "mapping_sql", "mapping_pyspark", "code_to_mapping")
+STEPS = ("analyze", "gen_input", "gen_expected", "convert", "cloud", "explain", "mapping_sql", "mapping_pyspark", "code_to_mapping", "resolve_schema")
 UNVERIFIED = "Copilot-predicted (UNVERIFIED)"
 MAX_PREDICT_LINES = 200
 AUDIT_COLUMNS = ["time", "reviewer", "job", "action", "artifact", "sha256", "decision", "comment"]
@@ -186,7 +186,7 @@ def build_prompt(cfg, name, step, options=None):
               "{expected_head}": head_lines(path / "expected.csv"),
               "{python_job}": read_text(path / "new_job.py", "(not written yet)"),
               "{target}": cfg.target}
-    if step in ("explain", "mapping_sql", "mapping_pyspark", "code_to_mapping"):
+    if step in ("explain", "mapping_sql", "mapping_pyspark", "code_to_mapping", "resolve_schema"):
         import workflows                       # imported here because workflows itself imports core
         values = workflows.prompt_values(cfg, name, step, options or {})
     for key, value in values.items():
@@ -561,7 +561,15 @@ def build_report(cfg, name):
         for target, g in m["generated"].items():
             c = g["coverage"]["counts"]
             out.append("- Generated %s (%s): %d found, %d to verify, %d missing of %d checks" % (target, "approved" if g["approved"] else "not approved", c["found"], c["verify"], c["missing"], g["coverage"]["total"]))
+            t = g.get("tests", {}).get("check")
+            if t and t["parses"]:
+                out.append("  - Unit tests: %d test(s); %d of %d columns and rules tested, %d weak or skipped, %d without a test" % (
+                    t["tests"], t["counts"]["tested"], t["total"], t["counts"]["weak"] + t["counts"]["skipped"], t["counts"]["missing"]))
+            else:
+                out.append("  - Unit tests: none saved for this code")
         out.append("")
+        for target, text in (m.get("documentation") or {}).items():
+            out += ["## Documentation (%s, version %d)" % ("SQL" if target == "sql" else "PySpark", m["version"]), "", re.sub(r"^(#+) ", lambda mm: "#" * (len(mm.group(1)) + 2) + " ", text, flags=re.M).strip(), ""]
     if extra["derived"]:
         d = extra["derived"]
         out += ["## Mapping built from code (%s)" % ("approved" if d["approved"] else "not approved"), "", "- %d target columns, %d rules" % (d["summary"]["columns"], d["summary"]["rules"])]

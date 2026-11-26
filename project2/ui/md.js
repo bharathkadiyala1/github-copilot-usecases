@@ -4,7 +4,7 @@ function escapeHtml(s){return String(s).replace(/[&<>"]/g,function(c){return {'&
 function md(src){
   var lines=String(src||'').replace(/\r/g,'').split('\n'), out=[], i=0;
   function inline(t){return escapeHtml(t).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g,'$1<i>$2</i>')}
-  function cells(l){return l.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(function(c){return c.trim()})}
+  function cells(l){return l.trim().replace(/^\|/,'').replace(/(^|[^\\])\|$/,'$1').split(/(?<!\\)\|/).map(function(c){return c.trim().replace(/\\\|/g,'|')})}
   function blockStart(l){return /^\s*(```|#{1,6}\s|[-*]\s|\d+[.)]\s|>|\|)/.test(l)||/^(-{3,}|\*{3,})\s*$/.test(l.trim())}
   while(i<lines.length){
     var l=lines[i], m;

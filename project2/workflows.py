@@ -11,17 +11,22 @@ import io
 import json
 import re
 import shutil
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
 import core
 import mapdiff
 import mapping
+import qa
 import scan
+import schema
 
 MAX_UPLOAD = 10 * 1024 * 1024
-NEW_STEPS = ("explain", "mapping_sql", "mapping_pyspark", "code_to_mapping")
+UPLOAD_TYPES = (".xlsx", ".xlsm", ".csv", ".tsv", ".txt", ".md", ".json")
+NEW_STEPS = ("explain", "mapping_sql", "mapping_pyspark", "code_to_mapping", "resolve_schema")
 GENERATED = {"sql": "generated.sql", "pyspark": "generated_pyspark.py"}
+TESTS = {"sql": "test_generated_sql.py", "pyspark": "test_generated_pyspark.py"}
 
 
 # ---------------------------------------------------------------- understand
@@ -49,6 +54,8 @@ def prompt_values(cfg, name, step, options):
             raise core.UserError("Add the legacy script first.")
         found = scan.scan_sources(texts)
         return {"{source}": "\n\n".join("### FILE: %s\n%s" % (n, t) for n, t in texts.items()), "{facts}": scan.facts_text(found)}
+    if step == "resolve_schema":
+        return schema_prompt_values(path)
     model = load_model(path / "mapping" / "model.json")
     if not model:
         raise core.UserError("Upload the mapping document first.")
@@ -115,19 +122,109 @@ def version_code(path, n, target, latest):
     return code
 
 
+def version_tests(path, n, target, latest):
+    text = core.read_text(version_dir(path, n) / TESTS[target])
+    if not text.strip() and n == latest:
+        text = core.read_text(path / "output" / TESTS[target])
+    return text
+
+
 def _archive_current_work(path, latest):
     """Before a new version starts: keep the current code and replies with the version they belong to, then clear them."""
     folder = version_dir(path, latest)
-    for target, fname in GENERATED.items():
+    for target, fname in list(GENERATED.items()) + list(TESTS.items()):
         src = path / "output" / fname
         if src.exists():
             if not (folder / fname).exists():
                 shutil.copy2(src, folder / fname)
             src.unlink()
+    for target, fname in GENERATED.items():
         reply = path / "answers" / ("mapping_%s.md" % target)
         if reply.exists():
             shutil.copy2(reply, folder / ("reply_%s.md" % target))
             reply.unlink()
+
+
+# ---------------------------------------------------------------- reading an upload (with a review step when unsure)
+def _pending_dir(path):
+    return path / "mapping" / "pending"
+
+
+def _load_pending(path):
+    folder = _pending_dir(path)
+    meta = json.loads(core.read_text(folder / "pending.json", "null") or "null")
+    if not meta or not (folder / "file.bin").exists():
+        return None
+    return meta, (folder / "file.bin").read_bytes()
+
+
+def _clear_pending(path):
+    shutil.rmtree(_pending_dir(path), ignore_errors=True)
+
+
+def _row_key(row):
+    cells = [schema._flat(c) for c in row]
+    while cells and not cells[-1]:
+        cells.pop()
+    return cells
+
+
+def _remembered(path, grids):
+    """Column choices a person confirmed before, reused when the same header row shows up again."""
+    memory = json.loads(core.read_text(path / "mapping" / "schema_memory.json", "[]") or "[]")
+    found = {}
+    for entry in memory:
+        for sheet, rows in grids.items():
+            for i, row in enumerate(rows[:80]):
+                if entry["kind"] not in found and _row_key(row) == entry["headers"]:
+                    found[entry["kind"]] = {"sheet": sheet, "header_row": i + 1, "columns": entry["columns"]}
+    return found
+
+
+def _remember(path, grids, model):
+    """Save the confirmed column choices of this file so the next upload with the same headers needs no review."""
+    memory = json.loads(core.read_text(path / "mapping" / "schema_memory.json", "[]") or "[]")
+    for t in model["detection"]["tables"]:
+        rows = grids.get(t["sheet"])
+        if not rows or t["header_row"] - 1 >= len(rows):
+            continue
+        entry = {"kind": t["kind"], "headers": _row_key(rows[t["header_row"] - 1]), "columns": {c["letter"]: c["field"] for c in t["columns"] if c["field"]}}
+        memory = [m for m in memory if not (m["kind"] == entry["kind"] and m["headers"] == entry["headers"])] + [entry]
+    (path / "mapping" / "schema_memory.json").write_text(json.dumps(memory[-30:], indent=1), encoding="utf-8")
+
+
+def _read_upload(path, filename, data, overrides=None):
+    """Returns (model or None, error text, report, grids). A model comes back only when the layout is understood and
+    either clear, remembered from an earlier confirmation, or chosen by a person (overrides)."""
+    try:
+        grids = mapping.read_any(data, filename)
+    except ValueError as error:
+        raise core.UserError(str(error))
+    if overrides:
+        try:
+            model = mapping.parse_workbook(grids, overrides)
+        except schema.Unresolved as e:
+            return None, str(e), e.report or {}, grids
+        model["detection"]["by"] = "confirmed"
+        return model, "", model["detection"], grids
+    error, report = "", {}
+    try:
+        model = mapping.parse_workbook(grids)
+        if not model["detection"]["needs_review"]:
+            model["detection"]["by"] = "auto"
+            return model, "", model["detection"], grids
+        report = model["detection"]
+    except schema.Unresolved as e:
+        error, report = str(e), e.report or {}
+    remembered = _remembered(path, grids)
+    if remembered:
+        try:
+            model = mapping.parse_workbook(grids, remembered)
+            model["detection"]["by"] = "remembered"
+            return model, "", model["detection"], grids
+        except schema.Unresolved:
+            pass
+    return None, error, report, grids
 
 
 def save_mapping_upload(cfg, name, filename, b64, note=""):
@@ -138,14 +235,24 @@ def save_mapping_upload(cfg, name, filename, b64, note=""):
         raise core.UserError("The file could not be read. Try uploading it again.")
     if not data or len(data) > MAX_UPLOAD:
         raise core.UserError("Choose an .xlsx file under 10 MB.")
-    if not str(filename).lower().endswith(".xlsx"):
-        raise core.UserError("Only .xlsx mapping documents are supported. In Excel use Save As > Excel Workbook (.xlsx).")
-    try:
-        model = mapping.load_xlsx(data)
-    except (ValueError, KeyError) as error:
-        raise core.UserError(str(error))
-    model["filename"] = re.sub(r"[^A-Za-z0-9_. -]", "_", str(filename))[:80]
+    if not str(filename).lower().endswith(UPLOAD_TYPES):
+        raise core.UserError("Upload an Excel workbook (.xlsx) or a CSV, tab-separated, markdown or JSON table.")
     (path / "mapping").mkdir(exist_ok=True)
+    model, error, report, grids = _read_upload(path, filename, data)
+    if model is None:                                              # not sure: keep the file aside and ask a person
+        folder = _pending_dir(path)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "file.bin").write_bytes(data)
+        (folder / "pending.json").write_text(json.dumps({"filename": re.sub(r"[^A-Za-z0-9_. -]", "_", str(filename))[:80], "note": str(note or "")[:300], "overrides": {}}), encoding="utf-8")
+        state = mapping_state(cfg, name)
+        state["upload_result"] = {"new": False, "pending": True, "message": "Please check how the file was read before it is saved."}
+        return state
+    _clear_pending(path)
+    return _commit_mapping(cfg, name, path, filename, data, model, note, grids)
+
+
+def _commit_mapping(cfg, name, path, filename, data, model, note, grids=None):
+    model["filename"] = re.sub(r"[^A-Za-z0-9_. -]", "_", str(filename))[:80]
     _ensure_first_version(path)
     versions = read_versions(path)
     same = versions and versions[-1]["sha"] == hashlib.sha256(data).hexdigest()
@@ -159,6 +266,8 @@ def save_mapping_upload(cfg, name, filename, b64, note=""):
     _write_version(path, n, model["filename"], data, model, cfg.reviewer, str(note or "")[:300])
     (path / "mapping" / "mapping.xlsx").write_bytes(data)
     (path / "mapping" / "model.json").write_text(json.dumps(model, indent=2), encoding="utf-8")
+    if grids is not None and model.get("detection", {}).get("by") == "confirmed":
+        _remember(path, grids, model)
     message = "Saved as version %d." % n
     if versions:
         d = mapdiff.diff_models(version_model(path, n - 1), model)
@@ -168,6 +277,93 @@ def save_mapping_upload(cfg, name, filename, b64, note=""):
     state = mapping_state(cfg, name)
     state["upload_result"] = {"new": True, "n": n, "message": message}
     return state
+
+
+def pending_state(path):
+    """What the Review screen shows: how the waiting file was read, what is unclear, and the choices a person can make."""
+    loaded = _load_pending(path)
+    if not loaded:
+        return None
+    meta, data = loaded
+    model, error, report, grids = _read_upload(path, meta["filename"], data, meta.get("overrides") or None)
+    if model is not None and not meta.get("overrides"):
+        report = model["detection"]
+    focus = {}
+    for t in (report or {}).get("tables", []):
+        focus.setdefault(t["sheet"], []).append(t["header_row"] - 1)
+    return {"filename": meta["filename"], "note": meta.get("note", ""), "ok": model is not None or bool((report or {}).get("resolved")), "error": error, "report": report or {"tables": [], "warnings": []},
+            "sheets": list(grids), "preview": schema.sample_view(grids, focus=focus),
+            "fields": {"mapping": [{"field": f, "label": l} for f, l in schema.MAP_HEADERS], "rules": [{"field": f, "label": l} for f, l in schema.RULE_HEADERS]},
+            "overrides": meta.get("overrides") or {}}
+
+
+def schema_prompt_values(path):
+    loaded = _load_pending(path)
+    if not loaded:
+        raise core.UserError("Upload the mapping document first. This step is only needed when the tool is unsure how to read a file.")
+    meta, data = loaded
+    grids = mapping.read_any(data, meta["filename"])
+    try:
+        report = mapping.parse_workbook(grids, meta.get("overrides") or None)["detection"]
+    except schema.Unresolved as e:
+        report = e.report or {"tables": []}
+    focus, guess = {}, []
+    for t in report.get("tables", []):
+        focus.setdefault(t["sheet"], []).append(t["header_row"] - 1)
+        guess.append("%s table: sheet '%s', header row %d, columns: %s" % (t["kind"], t["sheet"], t["header_row"],
+                     ", ".join("%s=%s" % (c["letter"], c["field"] or "?") for c in t["columns"]) or "none"))
+    lines = lambda spec: "\n".join("- %s (%s)" % (f, l) for f, l in spec)
+    views = json.dumps(schema.sample_view(grids, focus=focus), indent=1)
+    return {"{mapping_fields}": lines(schema.MAP_HEADERS), "{rules_fields}": lines(schema.RULE_HEADERS),
+            "{guess}": "\n".join(guess) or "(nothing could be recognised)", "{views}": views}
+
+
+def resolve_pending(cfg, name, overrides=None, use_reply=False):
+    """Change how the waiting file is read (by hand, or from Copilot's reply) and show the result. Nothing is saved as a version yet."""
+    path = core.job_dir(cfg, name)
+    loaded = _load_pending(path)
+    if not loaded:
+        raise core.UserError("There is no file waiting for review.")
+    meta, _ = loaded
+    if use_reply:
+        reply = core.read_text(path / "answers" / "resolve_schema.md")
+        if not reply.strip():
+            raise core.UserError("Save Copilot's reply first.")
+        try:
+            overrides = schema.overrides_from_reply(reply)
+        except ValueError as error:
+            raise core.UserError(str(error))
+    if overrides is not None:
+        meta["overrides"] = overrides
+        (_pending_dir(path) / "pending.json").write_text(json.dumps(meta), encoding="utf-8")
+    state = mapping_state(cfg, name)
+    return state
+
+
+def confirm_pending(cfg, name):
+    path = core.job_dir(cfg, name)
+    loaded = _load_pending(path)
+    if not loaded:
+        raise core.UserError("There is no file waiting for review.")
+    meta, data = loaded
+    overrides = meta.get("overrides") or {}
+    if not overrides:                                         # accepting the tool's own reading: pin it so it is saved exactly as shown
+        try:
+            shown = mapping.parse_workbook(mapping.read_any(data, meta["filename"]))["detection"]
+        except schema.Unresolved as e:
+            raise core.UserError(str(e))
+        overrides = {t["kind"]: {"sheet": t["sheet"], "header_row": t["header_row"], "columns": {c["letter"]: c["field"] for c in t["columns"] if c["field"]}}
+                     for t in shown["tables"]}
+    model, error, report, grids = _read_upload(path, meta["filename"], data, overrides)
+    if model is None:
+        raise core.UserError(error or "The file still could not be read. Set the columns by hand.")
+    _clear_pending(path)
+    return _commit_mapping(cfg, name, path, meta["filename"], data, model, meta.get("note", ""), grids)
+
+
+def discard_pending(cfg, name):
+    _clear_pending(core.job_dir(cfg, name))
+    return mapping_state(cfg, name)
 
 
 def _decision_for_sha(cfg, name, artifact, sha):
@@ -182,17 +378,19 @@ def mapping_state(cfg, name):
     path = core.job_dir(cfg, name)
     _ensure_first_version(path)
     model = load_model(path / "mapping" / "model.json")
+    pending = pending_state(path)
     if not model:
-        return {"model": None}
+        return {"model": None, "pending": pending}
     versions = read_versions(path)
     latest = versions[-1]["n"] if versions else 1
-    out = {"model": model, "summary": mapping.summary(model), "lint": mapping.lint(model), "generated": {}, "version": latest, "diff": None}
+    out = {"model": model, "summary": mapping.summary(model), "lint": mapping.lint(model), "generated": {}, "version": latest, "diff": None, "pending": pending}
     listing = []
     for i, v in enumerate(versions):
         item = dict(v)
         item["summary"] = "First version" if i == 0 else mapdiff.diff_models(version_model(path, versions[i - 1]["n"]), version_model(path, v["n"]))["summary"]
         item["changes"] = 0 if i == 0 else mapdiff.diff_models(version_model(path, versions[i - 1]["n"]), version_model(path, v["n"]))["counts"]["total"]
         item["code"] = {t: bool(version_code(path, v["n"], t, latest).strip()) for t in GENERATED}
+        item["tests"] = {t: bool(version_tests(path, v["n"], t, latest).strip()) for t in TESTS}
         item["approved"] = {t: _decision_for_sha(cfg, name, "generated_" + t, core.sha256_of(version_dir(path, v["n"]) / GENERATED[t])) == "approve"
                             if (version_dir(path, v["n"]) / GENERATED[t]).exists() else False for t in GENERATED}
         listing.append(item)
@@ -205,8 +403,11 @@ def mapping_state(cfg, name):
     for target, fname in GENERATED.items():
         code = core.read_text(path / "output" / fname)
         if code.strip():
-            out["generated"][target] = {"code": code, "coverage": mapping.coverage(model, code), "approved": artifact_decision(cfg, name, "generated_" + target) == "approve"}
-    out["answers"] = {s: core.read_text(path / "answers" / (s + ".md")) for s in ("mapping_sql", "mapping_pyspark")}
+            tests = core.read_text(path / "output" / TESTS[target])
+            out["generated"][target] = {"code": code, "coverage": mapping.coverage(model, code), "approved": artifact_decision(cfg, name, "generated_" + target) == "approve",
+                                        "tests": {"code": tests, "check": qa.check_tests(model, tests, target)}}
+    out["answers"] = {s: core.read_text(path / "answers" / (s + ".md")) for s in ("mapping_sql", "mapping_pyspark", "resolve_schema")}
+    out["documentation"] = {t: documentation(cfg, name, latest, t, state=out) for t in out["generated"]}
     return out
 
 
@@ -253,6 +454,7 @@ def update_block(cfg, name, target, options):
 
 def extract_code(reply, target):
     """First fenced code block of the reply (prefers one tagged for the target language)."""
+    reply = qa.split_reply(reply)[0]                         # the '## Unit tests' part is not the code
     blocks = re.findall(r"```([A-Za-z]*)[^\n]*\n(.*?)```", reply, flags=re.S)
     if not blocks:
         return reply.strip()
@@ -276,13 +478,23 @@ def save_generated(cfg, name, target):
     (path / "output").mkdir(exist_ok=True)
     target_file = path / "output" / GENERATED[target]
     target_file.write_text(code + "\n", encoding="utf-8")
+    tests = qa.extract_tests(reply)
+    tests_file = path / "output" / TESTS[target]
+    if tests:
+        tests_file.write_text(tests + "\n", encoding="utf-8")
+    elif tests_file.exists():
+        tests_file.unlink()                                  # an older reply's tests do not belong to this code
     _ensure_first_version(path)
     versions = read_versions(path)
     if versions:                                             # keep a copy with the version this code is for
         folder = version_dir(path, versions[-1]["n"])
         shutil.copy2(target_file, folder / GENERATED[target])
+        if tests:
+            shutil.copy2(tests_file, folder / TESTS[target])
+        elif (folder / TESTS[target]).exists():
+            (folder / TESTS[target]).unlink()
         (folder / ("reply_%s.md" % target)).write_text(reply, encoding="utf-8")
-    core.log_event(cfg, cfg.reviewer, name, "code_extracted", "v%d %s" % (versions[-1]["n"] if versions else 1, GENERATED[target]), core.sha256_of(target_file), "", "")
+    core.log_event(cfg, cfg.reviewer, name, "code_extracted", "v%d %s" % (versions[-1]["n"] if versions else 1, GENERATED[target]), core.sha256_of(target_file), "", "tests saved" if tests else "no unit tests in the reply")
     return mapping_state(cfg, name)
 
 
@@ -416,6 +628,7 @@ def parse_reply(cfg, name, note=""):
         model = mapping.model_from_reply(reply)
     except ValueError as error:
         raise core.UserError(str(error))
+    model["detection"]["by"] = "auto" if not model["detection"]["needs_review"] else "reply"
     (path / "mapping").mkdir(exist_ok=True)
     _ensure_first_derived_version(cfg, path, name)
     versions = read_derived_versions(path)
@@ -470,9 +683,84 @@ def _csv_bytes(rows, headers):
     return buf.getvalue().encode("utf-8")
 
 
+def documentation(cfg, name, version=None, target=None, state=None):
+    """Markdown documentation for one version of the mapping and its code (written by the tool from the mapping, the checks and Copilot's reply)."""
+    path = core.job_dir(cfg, name)
+    versions = read_versions(path)
+    if not versions:
+        raise core.UserError("Upload the mapping document first.")
+    latest = versions[-1]["n"]
+    try:
+        n = int(version) if version else latest
+    except ValueError:
+        raise core.UserError("Unknown version.")
+    if n not in {v["n"] for v in versions}:
+        raise core.UserError("Unknown version.")
+    model = version_model(path, n)
+    if target not in GENERATED:
+        target = next((t for t in GENERATED if version_code(path, n, t, latest).strip()), "")
+    code = version_code(path, n, target, latest) if target else ""
+    tests = version_tests(path, n, target, latest) if target else ""
+    reply = core.read_text(version_dir(path, n) / ("reply_%s.md" % target)) if target else ""
+    if not reply.strip() and target and n == latest:
+        reply = core.read_text(path / "answers" / ("mapping_%s.md" % target))
+    approved = False
+    if target and code.strip():
+        folder_file = version_dir(path, n) / GENERATED[target]
+        sha = core.sha256_of(folder_file if folder_file.exists() else path / "output" / GENERATED[target])
+        approved = _decision_for_sha(cfg, name, "generated_" + target, sha) == "approve"
+    files = ([GENERATED[target]] if code.strip() else []) + ([TESTS[target]] if tests.strip() else []) + ["documentation.md", "mapping.xlsx"]
+    ctx = {"name": name, "version": n, "target": target, "model": model, "summary": mapping.summary(model), "lint": mapping.lint(model),
+           "coverage": mapping.coverage(model, code) if code.strip() else None, "tests": qa.check_tests(model, tests, target) if tests.strip() else None,
+           "assumptions": qa.reply_section(reply, "Assumptions and open questions"), "approved": approved, "files": files,
+           "changes": mapdiff.describe(mapdiff.diff_models(version_model(path, n - 1), model)) if n > 1 and version_model(path, n - 1) else "",
+           "when": datetime.now().strftime("Generated %Y-%m-%d")}
+    return qa.build_documentation(ctx)
+
+
+def package(cfg, name, target, version=None):
+    """One zip: the code, its unit tests, the documentation and the mapping workbook (they sit together so the tests run as delivered)."""
+    path = core.job_dir(cfg, name)
+    versions = read_versions(path)
+    if target not in GENERATED or not versions:
+        raise core.UserError("Choose SQL or PySpark.")
+    latest = versions[-1]["n"]
+    try:
+        n = int(version) if version else latest
+    except ValueError:
+        raise core.UserError("Unknown version.")
+    code, tests = version_code(path, n, target, latest), version_tests(path, n, target, latest)
+    if not code.strip():
+        raise core.UserError("No generated code for that version.")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(GENERATED[target], code)
+        if tests.strip():
+            z.writestr(TESTS[target], tests)
+        z.writestr("documentation.md", documentation(cfg, name, n, target))
+        workbook = version_dir(path, n) / "mapping.xlsx"
+        if workbook.exists():
+            z.write(workbook, "mapping.xlsx")
+        z.writestr("README.txt", "Unit tests: put the files together in one folder and run `pytest %s`.\n%s\n" % (
+            TESTS[target], "SQL tests need `pip install duckdb pytest`." if target == "sql" else "PySpark tests need `pip install pyspark pytest`."))
+    core.log_event(cfg, cfg.reviewer, name, "download", "package v%d %s" % (n, target), "", "", "")
+    return "%s_v%d_%s_package.zip" % (name, n, target), "application/zip", buf.getvalue()
+
+
 def download(cfg, name, what, version=None):
     """Returns (filename, content type, bytes)."""
     path = core.job_dir(cfg, name)
+    if what == "doc":
+        return "%s_documentation.md" % name, "text/markdown; charset=utf-8", documentation(cfg, name, version, None).encode("utf-8")
+    if what in ("package_sql", "package_pyspark"):
+        return package(cfg, name, what.split("_", 1)[1], version)
+    if what in ("tests_sql", "tests_pyspark"):
+        t = what.split("_", 1)[1]
+        versions = read_versions(path)
+        text = version_tests(path, int(version), t, versions[-1]["n"]) if version and str(version).isdigit() and versions else core.read_text(path / "output" / TESTS[t])
+        if not text.strip():
+            raise core.UserError("No unit tests saved for that code.")
+        return "%s_%s" % (name, TESTS[t]), "text/plain; charset=utf-8", text.encode("utf-8")
     if what in ("sql", "pyspark"):
         if version:
             try:

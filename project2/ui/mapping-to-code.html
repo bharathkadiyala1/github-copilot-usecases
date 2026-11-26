@@ -10,10 +10,13 @@
 
   <div id="content" hidden>
     <div class="card"><h2>1. Upload the mapping document</h2>
-      <div class="row"><input type="file" id="xl" accept=".xlsx"> <span class="hint">Excel (.xlsx) with a mapping sheet and, optionally, a joins and filters sheet</span></div>
+      <div class="row"><input type="file" id="xl" accept=".xlsx,.xlsm,.csv,.tsv,.txt,.md,.json"> <span class="hint">Excel (.xlsx) or CSV with a mapping table and, optionally, a joins and filters table. Any header names, any order, any tab names.</span></div>
       <div class="row"><input type="text" id="vnote" placeholder="What changed in this version? (optional note, saved with the version)" style="flex:1"></div>
       <div id="fileState" class="hint"></div>
       <p class="hint">Uploading a changed mapping saves a <b>new version</b> and shows exactly what changed. Uploading the same file again does nothing.</p></div>
+
+    <div class="card" id="review" hidden><h2>Check how the file was read <span class="pill warn">needs a look</span></h2>
+      <div id="reviewOut"></div><div id="cp_resolve_schema" style="margin-top:12px"></div></div>
 
     <div class="card" id="versions" hidden><h2>2. Versions and changes <span class="pill" id="verPill"></span></h2>
       <div id="verTable"></div>
@@ -30,7 +33,12 @@
       <div id="cp_mapping_sql"></div><div id="cp_mapping_pyspark" hidden></div>
       <div id="genOut"></div></div>
 
-    <div class="card" id="approve" hidden><h2>5. Sign off and download</h2>
+    <div class="card" id="summaryCard" hidden><h2>5. Summary: code, unit tests and documentation <span class="pill" id="sumPill"></span></h2>
+      <div class="row"><a class="btn" id="dlPackage" href="#">Download package (code + tests + documentation + mapping)</a><a class="btn alt" id="dlTests" href="#">Unit tests only</a><a class="btn alt" id="dlDoc" href="#">Documentation (.md)</a></div>
+      <p class="hint">The documentation is written by the tool from the mapping and its checks; only the assumptions come from Copilot.</p>
+      <div class="readbox md" id="docOut"></div></div>
+
+    <div class="card" id="approve" hidden><h2>6. Sign off and download</h2>
       <div class="row"><input type="text" id="who" placeholder="Your name" style="width:180px"><input type="text" id="note" placeholder="Comment (optional)" style="flex:1"><button id="approveCode">I reviewed the code: Sign off</button></div>
       <div class="row"><a class="btn" id="dlCode" href="#">Download code</a><span id="reportBtn"></span></div>
       <p class="hint">Generated code is a draft. Run it against test data in your own environment and compare the results (Modernization Studio and Reconcile help) before it goes anywhere near production.</p></div>
@@ -38,10 +46,10 @@
 </div>
 <footer class="foot">Mock data only &middot; AI-assisted, human-approved &middot; every action is recorded in the audit trail</footer>
 <div id="msg"></div>
-<script src="/ui/md.js"></script><script src="/ui/nav.js"></script><script src="/ui/common.js"></script>
+<script src="/ui/md.js"></script><script src="/ui/nav.js"></script><script src="/ui/common.js"></script><script src="/ui/review.js"></script>
 <script>
 mainNav('/mapping-to-code'); loadLogo();
-let target='sql', st=null;
+let target='sql', st=null, pend=null;
 const DIALECTS=['Snowflake SQL','PostgreSQL','Oracle SQL','SQL Server T-SQL','Teradata SQL','BigQuery SQL','Databricks SQL','ANSI SQL'];
 window.promptQuery=step=>(step==='mapping_sql'?'&dialect='+encodeURIComponent($('dialect').value):'')+(($('upd').checked&&!$('updRow').hidden)?'&update=1':'');
 async function reload(){ await load(job) }
@@ -52,6 +60,7 @@ function parsedHtml(d){
   if(s.parameters.length) h+='<p class="hint">Parameters needed at run time: '+s.parameters.map(p=>':'+esc(p)).join(', ')+'</p>';
   h+='<h3 style="font-size:15px;margin:16px 0 4px">Checks on the document</h3>'+lintHtml(d.lint);
   if(d.reference_coverage) h+='<h3 style="font-size:15px;margin:18px 0 4px">Does the reference SQL in your workbook follow its own rules?</h3>'+coverageHtml(d.reference_coverage,'Reference SQL in the workbook');
+  h+='<details><summary>How each column was read</summary>'+detectionHtml(m.detection)+'</details>';
   h+='<details><summary>Show the mapping ('+s.columns+' columns)</summary>'+mappingTable(m)+'</details>';
   if(m.rules.length) h+='<details><summary>Show the joins and rules ('+s.rules+')</summary>'+rulesTable(m)+'</details>';
   return h;
@@ -59,12 +68,13 @@ function parsedHtml(d){
 function genHtml(d){
   const g=d.generated[target]; if(!g) return '<div class="empty" style="margin-top:10px">No code extracted yet. Paste the reply above, then click <b>Extract code and check it</b>.</div>';
   return '<h3 style="font-size:15px;margin:16px 0 4px">Generated code</h3><div class="codebox">'+esc(g.code)+'</div>'+
-    '<h3 style="font-size:15px;margin:18px 0 4px">Rule coverage: does the code cover the mapping?</h3>'+coverageHtml(g.coverage,'Mapping items found in the generated code');
+    '<h3 style="font-size:15px;margin:18px 0 4px">Rule coverage: does the code cover the mapping?</h3>'+coverageHtml(g.coverage,'Mapping items found in the generated code')+testsHtml(g);
 }
 async function load(name){
   const s=await call('GET','/api/job/'+name); const d=st=await call('GET','/api/job/'+name+'/mapping');
   fillPanel('mapping_sql',s.answers.mapping_sql); fillPanel('mapping_pyspark',s.answers.mapping_pyspark); reportLinks('reportBtn');
   const has=!!d.model;
+  fillPanel('resolve_schema',s.answers.resolve_schema); renderReview(d.pending);
   renderVersions(d);
   $('parsed').hidden=!has; $('gen').hidden=!has; $('approve').hidden=!has;
   $('fileState').innerHTML=has?'Using <b>'+esc(d.model.filename||'mapping.xlsx')+'</b>. Upload another file to replace it.':'';
@@ -73,6 +83,11 @@ async function load(name){
   $('updRow').hidden=!(d.previous_code&&d.previous_code[target]); $('genTitle').textContent='4. Generate the code for version '+d.version;
   $('parsedOut').innerHTML=parsedHtml(d); $('genOut').innerHTML=genHtml(d);
   const g=d.generated[target];
+  $('summaryCard').hidden=!g;
+  if(g){ const c=g.tests.check, base='/api/job/'+encodeURIComponent(name)+'/download?what=';
+    $('sumPill').textContent=g.tests.code?(c.counts.tested+' of '+c.total+' items tested'):'no unit tests yet'; $('sumPill').className='pill '+(g.tests.code&&c.counts.missing===0&&c.parses?'ok':'warn');
+    $('dlPackage').href=base+'package_'+target; $('dlDoc').href=base+'doc'; $('dlTests').href=g.tests.code?base+'tests_'+target:'#'; $('dlTests').style.opacity=g.tests.code?1:.4;
+    $('docOut').innerHTML=md(d.documentation[target]||''); }
   $('approveCode').disabled=!g; const a=$('dlCode'); a.href=g?'/api/job/'+name+'/download?what='+target:'#'; a.style.opacity=g?1:.4; a.style.pointerEvents=g?'auto':'none';
   a.textContent='Download '+(target==='sql'?'.sql':'.py'); $('approveCode').textContent=g&&g.approved?'Signed off ✓':'I reviewed the code: Sign off';
 }
@@ -81,14 +96,22 @@ function setTarget(t){ target=t; $('tSql').className=t==='sql'?'on':''; $('tSpar
 $('tSql').onclick=()=>setTarget('sql'); $('tSpark').onclick=()=>setTarget('pyspark');
 $('dialect').innerHTML=DIALECTS.map(x=>'<option>'+x+'</option>').join('');
 $('xl').onchange=async()=>{ const f=$('xl').files[0]; if(!f) return;
-  await work('Reading the workbook...',async()=>{ const r=await call('POST','/api/job/'+job+'/mapping_upload',{filename:f.name,b64:b64(await f.arrayBuffer()),note:$('vnote').value}); $('xl').value=''; if(r.upload_result.new) $('vnote').value=''; toast(r.upload_result.message,!r.upload_result.new&&false); await load(job); if(r.upload_result.new&&r.version>1) $('versions').scrollIntoView({behavior:'smooth'}) }) };
+  await work('Reading the workbook...',async()=>{ const r=await call('POST','/api/job/'+job+'/mapping_upload',{filename:f.name,b64:b64(await f.arrayBuffer()),note:$('vnote').value}); $('xl').value=''; if(r.upload_result.new) $('vnote').value=''; toast(r.upload_result.message,!r.upload_result.new&&false); await load(job); if(r.upload_result.pending) $('review').scrollIntoView({behavior:'smooth'}); else if(r.upload_result.new&&r.version>1) $('versions').scrollIntoView({behavior:'smooth'}) }) };
+function renderReview(p){
+  $('review').hidden=!p; if(!p) return; pend=p; $('reviewOut').innerHTML=reviewHtml(p);
+}
+async function applyChoices(){ await work('Re-reading...',async()=>{ const r=await call('POST','/api/job/'+job+'/mapping_resolve',{overrides:collectOverrides(pend)}); st=r; renderReview(r.pending); toast(r.pending.ok?'Read. Check the result, then save.':'Still not enough to read the table.',!r.pending.ok) }) }
+async function rereadTable(k){ await work('Re-reading...',async()=>{ const r=await call('POST','/api/job/'+job+'/mapping_resolve',{overrides:collectOverrides(pend,k)}); st=r; renderReview(r.pending) }) }
+async function saveReading(){ await work('Saving...',async()=>{ await call('POST','/api/job/'+job+'/mapping_resolve',{overrides:collectOverrides(pend)}); const r=await call('POST','/api/job/'+job+'/mapping_confirm',{}); toast(r.upload_result.message); await load(job) }) }
+async function discardUpload(){ await work('Cancelling...',async()=>{ await call('POST','/api/job/'+job+'/mapping_discard',{}); toast('Upload cancelled'); await load(job) }) }
+async function applyReply(){ await work('Applying...',async()=>{ if(!(await saveAnswer('resolve_schema',true))) return; const r=await call('POST','/api/job/'+job+'/mapping_resolve',{use_reply:true}); renderReview(r.pending); toast(r.pending.ok?'Copilot\'s answer applied. Check it, then save.':'Applied, but the table still cannot be read.',!r.pending.ok) }) }
 function when(t){ return t?t.replace('T',' '):'' }
 function renderVersions(d){
   const vs=d.versions||[]; $('versions').hidden=!vs.length; if(!vs.length) return;
   $('verPill').textContent=vs.length===1?'1 version':vs.length+' versions, latest v'+d.version;
   $('verTable').innerHTML=table(['Version','Uploaded','By','File','Note','Changes vs previous','Code'],vs.slice().reverse().map(v=>[
     '<span class="vtag">v'+v.n+'</span>'+(v.n===d.version?' <span class="hint">latest</span>':''),nw(when(v.uploaded)),nw(v.by||''),esc(v.filename),esc(v.note||''),esc(v.summary),
-    ['sql','pyspark'].filter(t=>v.code[t]).map(t=>'<a href="/api/job/'+encodeURIComponent(job)+'/download?what='+t+'&version='+v.n+'" title="Download">'+(t==='sql'?'SQL':'PySpark')+(v.approved[t]?' \u2713':'')+'</a>').join(' &middot; ')||'<span class="hint">none yet</span>']));
+    ['sql','pyspark'].filter(t=>v.code[t]).map(t=>'<a href="/api/job/'+encodeURIComponent(job)+'/download?what=package_'+t+'&version='+v.n+'" title="Download code, tests and documentation">'+(t==='sql'?'SQL':'PySpark')+(v.approved[t]?' \u2713':'')+(v.tests[t]?' + tests':'')+'</a>').join(' &middot; ')||'<span class="hint">none yet</span>']));
   $('cmpRow').hidden=vs.length<2;
   const opts=vs.map(v=>'<option value="'+v.n+'">v'+v.n+'</option>').join(''); $('cmpA').innerHTML=opts; $('cmpB').innerHTML=opts;
   $('cmpA').value=vs.length>1?vs[vs.length-2].n:vs[0].n; $('cmpB').value=d.version;
@@ -109,6 +132,7 @@ $('approveCode').onclick=()=>approveItem('generated_'+target,'who','note');
 startPage(async name=>{
   if(!$('cp_mapping_sql').innerHTML){
     $('dialect').value=cfg.dialect||'Snowflake SQL';
+    mountPanel('cp_resolve_schema','resolve_schema','Ask Copilot to work out which column is which (optional)','<button onclick="applyReply()">Apply Copilot\'s answer</button>',false);
     mountPanel('cp_mapping_sql','mapping_sql','Copilot: write the SQL','<button onclick="extract()">Extract code and check it</button>',true);
     mountPanel('cp_mapping_pyspark','mapping_pyspark','Copilot: write the PySpark','<button onclick="extract()">Extract code and check it</button>',true);
   }

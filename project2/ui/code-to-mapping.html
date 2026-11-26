@@ -34,13 +34,15 @@
 </div>
 <footer class="foot">Mock data only &middot; AI-assisted, human-approved &middot; every action is recorded in the audit trail</footer>
 <div id="msg"></div>
-<script src="/ui/md.js"></script><script src="/ui/nav.js"></script><script src="/ui/common.js"></script>
+<script src="/ui/md.js"></script><script src="/ui/nav.js"></script><script src="/ui/common.js"></script><script src="/ui/review.js"></script>
 <script>
 mainNav('/code-to-mapping'); loadLogo();
 async function reload(){ await load(job) }
 function stateHtml(d){
   const m=d.model, s=d.summary, srcs=Object.keys(s.source_tables);
   let h=tiles([[s.columns,'Target columns'],[s.rules,'Rules'],[srcs.length,'Source tables'],[Object.values(s.joins).reduce((a,b)=>a+b,0),'Joins'],[s.filters,'Filters'],[d.lint.filter(i=>i.severity==='high').length,'High-severity issues']]);
+  if(m.detection&&m.detection.needs_review) h+='<p class="hint"><b>Check the reading:</b> some column headers in Copilot\'s reply were not exact. See how each column was read below.</p>';
+  h+='<details'+(m.detection&&m.detection.needs_review?' open':'')+'><summary>How each column of the reply was read</summary>'+detectionHtml(m.detection)+'</details>';
   h+='<h3 style="font-size:15px;margin:6px 0 4px">Source to target mapping</h3>'+mappingTable(m);
   h+='<h3 style="font-size:15px;margin:18px 0 4px">Joins, filters and rules (in order)</h3>'+(m.rules.length?rulesTable(m):'<div class="empty">Copilot did not return a Joins_Filters table.</div>');
   h+='<h3 style="font-size:15px;margin:18px 0 4px">Checks on the mapping</h3>'+lintHtml(d.lint);

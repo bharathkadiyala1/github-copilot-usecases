@@ -11,7 +11,14 @@ Requirements:
 
 Reply in this exact shape:
 1. One fenced code block (```python) with the full module.
-2. A section "## Assumptions and open questions" as bullets.
-3. A section "## Rule traceability" as a table with columns: Rule or Map ID | Where in the code.
+2. A section "## Unit tests" with ONE fenced code block (```python): a complete, self-contained pytest file for the module above (rules below).
+3. A section "## Assumptions and open questions" as bullets.
+4. A section "## Rule traceability" as a table with columns: Rule or Map ID | Where in the code.
+
+Rules for the unit tests (a test with no assertion, or `assert True`, does not count):
+- A module-scoped fixture creates a local SparkSession (`master("local[1]")`). Each test registers its own tiny source DataFrames as temp views with the table names the module reads, imports `build_target` from the module `generated_pyspark` (same folder), calls it, and asserts on the collected rows.
+- Write ONE test function per Map ID, named test_<MapID>_<target_column> (for example test_M06_closing_balance_cad), and ONE per join, filter, dedup and aggregation rule, named test_rule_<Seq>_<short_name> (for example test_rule_4_fx_rate). Put the Map ID or "Rule <Seq>" in the function's docstring too.
+- Each test asserts the exact expected target values, including the edge case the rule exists for (no match, NULL, duplicate, boundary date, default value).
+- No network, no files other than the module, no real data.
 
 {update_block}{mapping}

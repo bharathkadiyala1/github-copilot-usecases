@@ -31,9 +31,13 @@ A **migration** is one folder under `jobs/` that holds a modernization's files, 
 
 ## Mapping workbook format (Mapping → Code)
 
-The reader finds tables by their headers, in any sheet, so small layout differences are fine.
-- Mapping table needs at least **Source Column** and **Target Column**. It also uses Map ID, Source/Target Schema, Table and Data Type, Key, Transformation / Business Logic, Nullable, Notes.
-- Joins and rules table needs **Seq** and **Join Condition / Filter Expression**. It also uses Type (Driver, Join, Filter, Dedup, Aggregation, Target Load), Rule Name, Left/Right Table (Alias), Join Type, Business Logic, Applies To Map IDs.
+Any header names, column order, tab names and tab order are accepted. Nothing is matched by exact text.
+- **Formats:** `.xlsx`, or CSV / tab-separated / markdown / JSON tables. The same reader is used for Copilot's reply on the Code → Mapping page.
+- **Tables are found by score, not by name.** Every sheet and every row is tried as a header row. The mapping table and the joins/filters table can be on separate tabs (any names, any order) or stacked on one sheet. Title rows above the header, two-row headers (a "Source" band over "Table" / "Column") and merged cells are handled.
+- **Columns are recognised three ways:** by the header words ("Src Tbl", "Target Field Name", `sourceColumn`, typos), by the values in the column (IDs like `M01`, SQL types, `PK`/`FK`, `INNER`/`LEFT`, `a.x = b.y`), and by position when two columns tie (source before target). A "Source ..." header is never read as a "Target ..." one.
+- **Minimum needed:** a target column plus a source column or a transformation rule. A joins/filters tab is optional (the page warns that joins and filters will be missing). Everything else may be absent.
+- **Values are normalised:** "Base Table" becomes Driver, "WHERE" becomes Filter, "Left Outer Join" becomes LEFT, "Primary Key" becomes PK, "NOT NULL" becomes N, `1.0` becomes `1`. Columns it does not use are kept as extras, never thrown away.
+- **Nothing is guessed silently.** Every column gets a confidence (high / medium / low). If the file is not clearly readable, it is **not saved**; the page shows **Check how the file was read**: each column with a dropdown to say what it means, and an optional Copilot step. The Copilot prompt contains only the header rows and a few sample rows and Copilot only says which column is which. The tool applies the answer itself, so no row can be changed, dropped or invented. Confirmed choices are remembered for the migration, so the same layout needs no review next time.
 - Reference SQL pasted in a cell is detected and checked against the rules too.
 
 `samples/Source_Target_Mapping_Example.xlsx` is an example. In it, the workbook's own reference SQL covers only some of its rules (it is missing the dedup, the valid-currency filter, the posted-only filter and the group by). The page shows this.
@@ -52,6 +56,14 @@ The reader finds tables by their headers, in any sheet, so small layout differen
 
 Default is copy and paste: build the prompt, copy it into Copilot Chat, paste the reply back, save. Nothing is sent anywhere by this app.
 Optional: set `COPILOT_CMD` in `.env` to show an *Ask Copilot directly* button (untested here, I had no Copilot command to try).
+
+## Unit tests and documentation (Mapping → Code)
+
+Each SQL or PySpark prompt now also asks Copilot for a **pytest file** under a "## Unit tests" heading: one test per Map ID and per join / filter / dedup / aggregation rule, with tiny mock rows and exact expected values. SQL tests use DuckDB and PySpark tests use a local SparkSession; a test the engine cannot run is kept and skipped with a reason.
+- The tool saves the code and the tests as separate files, with the mapping version they belong to, and checks that the test file is valid Python, calls the code, and that **every mapped column and rule has a test that asserts something**. Tests that assert nothing (`assert True`), are skipped, or are missing are listed.
+- **It does not prove the expected values are right.** It proves the tests exist, parse and cover every item. Run them (`pip install pytest duckdb`, then `pytest test_generated_sql.py` in the folder holding both files) and have a person check the expected values.
+- **Documentation** is written by the tool (not by Copilot) from the mapping, the checks, coverage, tests and the change list, so it cannot disagree with them. Only the "Assumptions and open questions" section is Copilot's, marked *AI draft*.
+- The page's **Summary** card shows the code, test coverage and documentation, and downloads one **package** (code, tests, `documentation.md`, `mapping.xlsx`). Each version's package can be downloaded from the version table. The evidence report includes the test results and the documentation.
 
 ## Mapping versions
 
@@ -83,6 +95,7 @@ Save the logo into `ui/` as `logo.png` (or `logo.jpg` / `logo.svg`). It appears 
 app.py          web server and page routes            core.py       jobs, prompts, compare, audit trail
 workflows.py    Understand / mapping job actions      mapping.py    read and write .xlsx, check mappings, coverage
 scan.py         script statistics and risk patterns   prompts/      Copilot prompt templates (edit freely)
+schema.py       resilient header / layout reader      qa.py         unit-test checks and documentation builder
 ui/             pages, style.css, shared md.js nav.js common.js
 jobs/           one folder per migration (demo jobs included)     samples/   example mapping workbook
 tests/          unit and end-to-end tests             audit/        audit_log.csv (created when you run it)

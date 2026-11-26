@@ -243,6 +243,116 @@ class ServerTests(unittest.TestCase):
         self.assertIn(b"INSERT INTO", body)
         self.assertIn("attachment", headers["Content-Disposition"])
 
+    def test_unclear_upload_waits_for_review_then_is_saved_and_remembered(self):
+        import base64
+        import sys
+        sys.path.insert(0, str(ROOT / "tests"))
+        from test_schema import make_xlsx, sample_grids
+        job = "review"
+        self.call("POST", "/api/jobs", {"name": job})
+        g = sample_grids()
+        g["Source_Target_Mapping"][3] = ["Ref", "Sys", "Sch", "Tbl", "Fld", "Dt", "TSch", "TTbl", "TFld", "TDt", "K", "Xform", "N?", "Cmt"]
+        data = make_xlsx(g)
+        up = lambda: self.call("POST", "/api/job/%s/mapping_upload" % job, {"filename": "odd.xlsx", "b64": base64.b64encode(data).decode(), "note": "odd headers"})
+        status, state = up()
+        self.assertEqual(status, 200)
+        self.assertIsNone(state["model"])                                   # nothing saved yet
+        self.assertTrue(state["upload_result"]["pending"])
+        self.assertIn("mapping table", state["pending"]["error"])
+        self.assertFalse(state["pending"]["ok"])
+        self.assertIn("Source_Target_Mapping", state["pending"]["preview"])
+        # the prompt for Copilot carries the headers and rows, not a rewrite request
+        prompt = self.call("GET", "/api/job/%s/prompt?step=resolve_schema" % job)[1]["prompt"]
+        for text in ("Allowed field names", "target_column", "TFld", "header_row"):
+            self.assertIn(text, prompt)
+        # Copilot answers; the tool applies it and checks it
+        reply = '```json\n{"mapping": {"sheet": "Source_Target_Mapping", "header_row": 4, "columns": {"A": "id", "B": "source_system", "C": "source_schema", "D": "source_table", "E": "source_column", "F": "source_type", "G": "target_schema", "H": "target_table", "I": "target_column", "J": "target_type", "K": "key", "L": "logic", "M": "nullable", "N": "notes", "Z": "bogus"}}}\n```'
+        self.call("POST", "/api/job/%s/file" % job, {"kind": "answer", "filename": "resolve_schema", "content": reply})
+        status, state = self.call("POST", "/api/job/%s/mapping_resolve" % job, {"use_reply": True})
+        self.assertEqual(status, 200)
+        self.assertTrue(state["pending"]["ok"], state["pending"]["error"])
+        self.assertEqual(state["pending"]["report"]["tables"][0]["rows"], 17)
+        status, state = self.call("POST", "/api/job/%s/mapping_confirm" % job, {})
+        self.assertEqual((status, state["version"], state["upload_result"]["new"]), (200, 1, True))
+        self.assertIsNone(state["pending"])
+        self.assertEqual(state["model"]["mappings"][0]["target_column"], "ACCOUNT_ID")
+        self.assertEqual(len(state["model"]["rules"]), 15)
+        # the same layout next time (a changed file in this migration) needs no review
+        g2 = sample_grids()
+        g2["Source_Target_Mapping"][3] = list(g["Source_Target_Mapping"][3])
+        g2["Source_Target_Mapping"][4][11] = "Direct move; changed"
+        status, state = self.call("POST", "/api/job/%s/mapping_upload" % job, {"filename": "odd_again.xlsx", "b64": base64.b64encode(make_xlsx(g2)).decode()})
+        self.assertEqual(status, 200)
+        self.assertIsNone(state["pending"], state["pending"] and state["pending"]["error"])
+        self.assertEqual((state["model"]["detection"]["by"], state["version"]), ("remembered", 2))
+
+    def test_bad_copilot_schema_reply_is_a_clear_error_and_discard_works(self):
+        import base64
+        job = "review3"
+        self.call("POST", "/api/jobs", {"name": job})
+        data = b"Col1,Col2,Col3\na,b,c\nd,e,f\n"
+        status, state = self.call("POST", "/api/job/%s/mapping_upload" % job, {"filename": "x.csv", "b64": base64.b64encode(data).decode()})
+        self.assertTrue(state["pending"])
+        self.call("POST", "/api/job/%s/file" % job, {"kind": "answer", "filename": "resolve_schema", "content": "sorry, I cannot do that"})
+        status, err = self.call("POST", "/api/job/%s/mapping_resolve" % job, {"use_reply": True})
+        self.assertEqual(status, 400)
+        self.assertEqual(self.call("POST", "/api/job/%s/mapping_confirm" % job, {})[0], 400)       # still cannot be read
+        by_hand = {"mapping": {"columns": {"A": "source_column", "B": "target_column"}}}
+        status, state = self.call("POST", "/api/job/%s/mapping_resolve" % job, {"overrides": by_hand})
+        self.assertTrue(state["pending"]["ok"])
+        status, state = self.call("POST", "/api/job/%s/mapping_discard" % job, {})
+        self.assertIsNone(state["pending"])
+
+    def test_generated_code_comes_with_unit_tests_and_documentation(self):
+        import base64
+        import io
+        import zipfile
+        import mapping
+        job = "withtests"
+        self.call("POST", "/api/jobs", {"name": job})
+        data = (ROOT / "samples" / "Source_Target_Mapping_Example.xlsx").read_bytes()
+        self.call("POST", "/api/job/%s/mapping_upload" % job, {"filename": "m.xlsx", "b64": base64.b64encode(data).decode()})
+        model = mapping.load_xlsx(data)
+        tests = "import duckdb\n\n" + "\n".join('def test_%s_x():\n    """%s"""\n    assert duckdb.connect().execute("select 1").fetchone()[0] == 1\n' % (m["id"], m["id"]) for m in model["mappings"][:10])
+        reply = "```sql\nINSERT INTO T (ACCOUNT_ID) SELECT a.ACCT_ID AS ACCOUNT_ID FROM CBS.ACCOUNT a -- M01\n```\n\n## Unit tests\n\n```python\n" + tests + "```\n\n## Assumptions and open questions\n- FX rate is daily.\n"
+        self.call("POST", "/api/job/%s/file" % job, {"kind": "answer", "filename": "mapping_sql", "content": reply})
+        status, state = self.call("POST", "/api/job/%s/save_generated" % job, {"target": "sql"})
+        self.assertEqual(status, 200)
+        g = state["generated"]["sql"]
+        self.assertNotIn("def test_", g["code"])                                     # the code is only the code
+        self.assertTrue(g["tests"]["check"]["parses"])
+        self.assertEqual(g["tests"]["check"]["counts"]["tested"], 10)
+        self.assertEqual(g["tests"]["check"]["counts"]["missing"], g["tests"]["check"]["total"] - 10)
+        self.assertTrue(state["versions"][0]["tests"]["sql"])
+        self.assertIn("FX rate is daily.", state["documentation"]["sql"])
+        self.assertIn("## 8. Unit tests", state["documentation"]["sql"])
+        # downloads: tests alone, documentation alone, and one package that holds everything
+        body, headers = self.raw("/api/job/%s/download?what=tests_sql" % job)
+        self.assertIn(b"def test_M01_x", body)
+        body, _ = self.raw("/api/job/%s/download?what=doc" % job)
+        self.assertIn(b"# withtests", body)
+        body, headers = self.raw("/api/job/%s/download?what=package_sql" % job)
+        z = zipfile.ZipFile(io.BytesIO(body))
+        self.assertEqual(sorted(z.namelist()), ["README.txt", "documentation.md", "generated.sql", "mapping.xlsx", "test_generated_sql.py"])
+        self.assertNotIn(b"def test_", z.read("generated.sql"))
+        self.assertEqual(self.call("GET", "/api/job/%s/doc" % job)[1]["markdown"][:2], "# ")
+        # a code reply without tests removes the old tests instead of keeping stale ones
+        self.call("POST", "/api/job/%s/file" % job, {"kind": "answer", "filename": "mapping_sql", "content": "```sql\nSELECT 1\n```"})
+        status, state = self.call("POST", "/api/job/%s/save_generated" % job, {"target": "sql"})
+        self.assertEqual(state["generated"]["sql"]["tests"]["code"], "")
+        self.assertEqual(self.call("GET", "/api/job/%s/download?what=tests_sql" % job)[0], 400)
+        # new mapping version: version 1 keeps its code and tests, version 2 starts clean
+        self.call("POST", "/api/job/%s/file" % job, {"kind": "answer", "filename": "mapping_sql", "content": reply})
+        self.call("POST", "/api/job/%s/save_generated" % job, {"target": "sql"})
+        edited = mapping.load_xlsx(data)
+        edited["mappings"][0]["notes"] = "changed"
+        status, state = self.call("POST", "/api/job/%s/mapping_upload" % job, {"filename": "m2.xlsx", "b64": base64.b64encode(mapping.write_xlsx(edited)).decode()})
+        self.assertEqual(state["version"], 2)
+        self.assertEqual(state["generated"], {})
+        self.assertEqual([v["tests"]["sql"] for v in state["versions"]], [True, False])
+        body, _ = self.raw("/api/job/%s/download?what=tests_sql&version=1" % job)
+        self.assertIn(b"def test_M01_x", body)
+
     def test_mapping_versions_and_change_tracking(self):
         import base64
         import copy
